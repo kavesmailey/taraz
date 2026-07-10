@@ -128,6 +128,11 @@
   }
   .toast.show { transform: translateY(0); opacity: 1; }
 
+  #rawInitData, #rawResponse {
+    width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--paper-raised); font-family: monospace;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }
   }
@@ -147,12 +152,16 @@
 <script>
 // ===================================================================
 // تنخواه — Telegram WebApp
-// این یک فایل، سه صفحه را مدیریت می‌کند: expense | request | charge
+// این یک فایل، صفحات را مدیریت می‌کند: expense | request | charge | test
 // انتخاب صفحه از طریق پارامتر ?screen= در آدرس مشخص می‌شود.
 // ===================================================================
 
-// ⚠️ TODO: وقتی n8n راه‌اندازی شد، این آدرس را با آدرس واقعی webhook عوض کن
-const API_BASE_URL = "https://CHANGE-ME.n8n-instance/webhook/tanakhah";
+// Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
+// ⚠️ فقط get-companies واقعاً ساخته و دیپلوی شده. بقیه‌ی endpoint های زیر
+// (tags, employees, expense, petty-cash-request, charge) هنوز به عنوان
+// Edge Function ساخته نشده‌اند — فراخوانی‌شون فعلاً fail می‌شود و به داده‌ی
+// دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
+const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
 const isInsideTelegram = !!(tg && tg.initData);
@@ -216,7 +225,7 @@ async function fetchBackend(endpoint) {
   }
 }
 
-// --- داده‌ی نمایشی برای پیش‌نمایش، تا زمان وصل‌شدن n8n ---
+// --- داده‌ی نمایشی برای پیش‌نمایش، تا زمان ساخته‌شدن بقیه‌ی Edge Function ها ---
 const DEMO_TAGS = [
   { id: 'fuel', name: 'سوخت' },
   { id: 'meal', name: 'پذیرایی' },
@@ -239,7 +248,7 @@ const screen = new URLSearchParams(location.search).get('screen') || 'expense';
 // صفحه: ثبت هزینه
 // ===================================================================
 async function renderExpenseScreen() {
-  const tagsData = (await fetchBackend('tags')) || DEMO_TAGS;
+  const tagsData = (await fetchBackend('get-tags')) || DEMO_TAGS;
   const balance = DEMO_BALANCE; // در آینده از fetchBackend('balance') گرفته می‌شود
 
   let selectedTag = null;
@@ -317,7 +326,7 @@ async function renderExpenseScreen() {
       tg ? tg.showAlert('یک تگ انتخاب کنید') : showToast('یک تگ انتخاب کنید');
       return;
     }
-    const result = await callBackend('expense', {
+    const result = await callBackend('submit-expense', {
       amount: Number(amount),
       tag_id: selectedTag,
       description: document.getElementById('description').value,
@@ -365,7 +374,7 @@ async function renderRequestScreen() {
       tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
       return;
     }
-    const result = await callBackend('petty-cash-request', {
+    const result = await callBackend('submit-petty-cash-request', {
       amount: Number(amount),
       description: document.getElementById('description').value,
     });
@@ -381,7 +390,7 @@ async function renderRequestScreen() {
 // صفحه: شارژ تنخواه (مدیر مالی)
 // ===================================================================
 async function renderChargeScreen() {
-  const employees = (await fetchBackend('employees')) || DEMO_EMPLOYEES;
+  const employees = (await fetchBackend('get-employees')) || DEMO_EMPLOYEES;
 
   app.innerHTML = `
     <div class="screen-title">💰 شارژ تنخواه</div>
@@ -432,7 +441,7 @@ async function renderChargeScreen() {
         tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
         return;
       }
-      const result = await callBackend('charge', {
+      const result = await callBackend('submit-charge', {
         employee_id: selectedEmployee.id,
         amount: Number(amount),
         description: document.getElementById('chargeDescription').value,
@@ -447,6 +456,53 @@ async function renderChargeScreen() {
 
   document.getElementById('search').addEventListener('input', (e) => renderList(e.target.value));
   renderList();
+}
+
+// ===================================================================
+// صفحه: تست اتصال — فراخوانی واقعی get-companies با initData واقعی
+// (بدون داده‌ی دمو، بدون شبیه‌سازی — نتیجه‌ی خام سرور مستقیم نشان داده می‌شود)
+// ===================================================================
+async function renderTestScreen() {
+  app.innerHTML = `
+    <div class="screen-title">🧪 تست اتصال get-companies</div>
+    <div class="ledger-row">
+      <label>وضعیت</label>
+      <div id="testStatus" style="font-size:14px;">در حال ارسال درخواست...</div>
+    </div>
+    <div class="ledger-row">
+      <label>initData (خام)</label>
+      <textarea id="rawInitData" rows="4" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
+    <div class="ledger-row">
+      <label>پاسخ خام سرور</label>
+      <textarea id="rawResponse" rows="10" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
+  `;
+
+  const initDataEl = document.getElementById('rawInitData');
+  const statusEl = document.getElementById('testStatus');
+  const responseEl = document.getElementById('rawResponse');
+
+  initDataEl.value = tg?.initData || '(بیرون از تلگرام هستید — initData خالی است)';
+
+  if (!tg?.initData) {
+    statusEl.textContent = '❌ initData موجود نیست. این صفحه باید از طریق دکمه‌ی «🧪 تست اتصال» در منوی تنظیمات، داخل تلگرام باز شود.';
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/get-companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData }),
+    });
+    const text = await res.text();
+    statusEl.textContent = res.ok ? `✅ HTTP ${res.status}` : `❌ HTTP ${res.status}`;
+    responseEl.value = text;
+  } catch (e) {
+    statusEl.textContent = '❌ خطا در اتصال به سرور';
+    responseEl.value = String(e);
+  }
 }
 
 // ===================================================================
@@ -477,6 +533,7 @@ function setupMainButton(label, onClick) {
 // ===================================================================
 if (screen === 'request') renderRequestScreen();
 else if (screen === 'charge') renderChargeScreen();
+else if (screen === 'test') renderTestScreen();
 else renderExpenseScreen();
 </script>
 </body>
