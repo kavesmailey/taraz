@@ -128,7 +128,7 @@
   }
   .toast.show { transform: translateY(0); opacity: 1; }
 
-  #rawInitData, #companiesResponse, #tagsResponse {
+  #rawInitData, #companiesResponse, #tagsResponse, #employeesResponse {
     width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--paper-raised); font-family: monospace;
   }
@@ -157,10 +157,10 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ فقط get-companies و get-tags واقعاً ساخته و دیپلوی شده‌اند. بقیه‌ی
-// endpoint های زیر (get-employees, submit-expense, ...) هنوز ساخته نشده‌اند
-// — فراخوانی‌شون فعلاً fail می‌شود و به داده‌ی دمو (DEMO_*) سقوط می‌کند.
-// این یک TODO شناخته‌شده است، نه باگ.
+// ⚠️ فقط get-companies، get-tags و get-employees واقعاً ساخته و دیپلوی شده‌اند.
+// بقیه‌ی endpoint های زیر (submit-expense, submit-petty-cash-request,
+// submit-charge, ...) هنوز ساخته نشده‌اند — فراخوانی‌شون فعلاً fail می‌شود
+// و به داده‌ی دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -459,8 +459,8 @@ async function renderChargeScreen() {
 }
 
 // ===================================================================
-// صفحه: تست اتصال — فراخوانی واقعی get-companies، و بعد get-tags برای
-// اولین شرکت برگشتی. بدون داده‌ی دمو — نتیجه‌ی خام سرور مستقیم نشان داده می‌شود.
+// صفحه: تست اتصال — زنجیره‌ی واقعی get-companies -> get-tags -> get-employees
+// بدون داده‌ی دمو — نتیجه‌ی خام هر سه سرور مستقیم نشان داده می‌شود.
 // ===================================================================
 async function renderTestScreen() {
   app.innerHTML = `
@@ -483,7 +483,12 @@ async function renderTestScreen() {
 
     <div class="ledger-row">
       <label>پاسخ get-tags (برای اولین شرکت لیست‌شده)</label>
-      <textarea id="tagsResponse" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
+      <textarea id="tagsResponse" rows="6" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
+
+    <div class="ledger-row">
+      <label>پاسخ get-employees (برای اولین شرکت لیست‌شده)</label>
+      <textarea id="employeesResponse" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
   `;
 
@@ -491,6 +496,7 @@ async function renderTestScreen() {
   const statusEl = document.getElementById('testStatus');
   const companiesEl = document.getElementById('companiesResponse');
   const tagsEl = document.getElementById('tagsResponse');
+  const employeesEl = document.getElementById('employeesResponse');
 
   initDataEl.value = tg?.initData || '(بیرون از تلگرام هستید — initData خالی است)';
 
@@ -520,13 +526,15 @@ async function renderTestScreen() {
   }
 
   if (companies.length === 0) {
-    statusEl.textContent = '⚠️ get-companies موفق بود ولی هیچ شرکتی برنگشت — get-tags صدا زده نمی‌شود.';
+    statusEl.textContent = '⚠️ get-companies موفق بود ولی هیچ شرکتی برنگشت — بقیه‌ی تست‌ها صدا زده نمی‌شوند.';
     tagsEl.value = '(شرکتی برای تست وجود ندارد)';
+    employeesEl.value = '(شرکتی برای تست وجود ندارد)';
     return;
   }
 
-  // مرحله ۲: get-tags برای اولین شرکت
   const firstCompany = companies[0];
+
+  // مرحله ۲: get-tags
   try {
     const res = await fetch(`${API_BASE_URL}/get-tags`, {
       method: 'POST',
@@ -535,10 +543,25 @@ async function renderTestScreen() {
     });
     const text = await res.text();
     tagsEl.value = `شرکت: ${firstCompany.name} (${firstCompany.company_id})\nHTTP ${res.status}\n${text}`;
-    statusEl.textContent = res.ok ? '✅ هر دو endpoint موفق بودند' : '❌ get-tags fail شد';
   } catch (e) {
     tagsEl.value = `خطا: ${e}`;
-    statusEl.textContent = '❌ get-tags fail شد';
+  }
+
+  // مرحله ۳: get-employees
+  // نکته: اگه کاربر فعلی role اش owner نباشه، انتظار می‌ره 403 برگردونه —
+  // این طبیعیه، نشونه‌ی خرابی نیست (فقط owner مجاز به دیدن این لیسته).
+  try {
+    const res = await fetch(`${API_BASE_URL}/get-employees`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, company_id: firstCompany.company_id }),
+    });
+    const text = await res.text();
+    employeesEl.value = `شرکت: ${firstCompany.name} (${firstCompany.company_id})\nHTTP ${res.status}\n${text}`;
+    statusEl.textContent = res.ok ? '✅ هر سه endpoint موفق بودند' : `⚠️ get-employees پاسخ ${res.status} داد (اگه 403 بود و کاربر owner نیست، طبیعیه)`;
+  } catch (e) {
+    employeesEl.value = `خطا: ${e}`;
+    statusEl.textContent = '❌ get-employees fail شد';
   }
 }
 
