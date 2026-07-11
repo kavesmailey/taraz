@@ -164,10 +164,10 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ فقط get-companies، get-tags، get-employees و submit-expense واقعاً
-// ساخته و دیپلوی شده‌اند. بقیه‌ی endpoint های زیر (submit-petty-cash-request,
-// submit-charge, ...) هنوز ساخته نشده‌اند — فراخوانی‌شون فعلاً fail می‌شود
-// و به داده‌ی دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
+// ⚠️ فقط get-companies، get-tags، get-employees، submit-expense و
+// submit-charge واقعاً ساخته و دیپلوی شده‌اند. submit-petty-cash-request
+// هنوز ساخته نشده — فراخوانیش فعلاً fail می‌شود و به داده‌ی دمو (DEMO_*)
+// سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -509,6 +509,18 @@ async function renderTestScreen() {
       <label>لاگ submit-expense (هر تست یک خط اضافه می‌شود)</label>
       <textarea id="expenseLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
+
+    <div class="ledger-row" id="chargeFormRow" style="display:none">
+      <label>🧪 تست submit-charge (فقط owner)</label>
+      <select id="testEmployeeSelect" style="margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;"></select>
+      <input id="testChargeAmount" type="number" placeholder="مبلغ شارژ (تومان)" style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:8px;" />
+      <button id="testSubmitChargeBtn" class="test-btn">ثبت شارژ تستی</button>
+    </div>
+
+    <div class="ledger-row">
+      <label>لاگ submit-charge (هر تست یک خط اضافه می‌شود)</label>
+      <textarea id="chargeLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
   `;
 
   const initDataEl = document.getElementById('rawInitData');
@@ -521,6 +533,11 @@ async function renderTestScreen() {
   const testTagSelect = document.getElementById('testTagSelect');
   const testAmount = document.getElementById('testAmount');
   const testSubmitExpenseBtn = document.getElementById('testSubmitExpenseBtn');
+  const chargeLogEl = document.getElementById('chargeLog');
+  const chargeFormRow = document.getElementById('chargeFormRow');
+  const testEmployeeSelect = document.getElementById('testEmployeeSelect');
+  const testChargeAmount = document.getElementById('testChargeAmount');
+  const testSubmitChargeBtn = document.getElementById('testSubmitChargeBtn');
 
   initDataEl.value = tg?.initData || '(بیرون از تلگرام هستید — initData خالی است)';
 
@@ -577,6 +594,7 @@ async function renderTestScreen() {
   }
 
   // مرحله ۳: get-employees (ممکنه 403 بده اگه کاربر owner نباشه — طبیعیه)
+  let employees = [];
   try {
     const res = await fetch(`${API_BASE_URL}/get-employees`, {
       method: 'POST',
@@ -585,6 +603,10 @@ async function renderTestScreen() {
     });
     const text = await res.text();
     employeesEl.value = `شرکت: ${firstCompany.name} (${firstCompany.company_id})\nHTTP ${res.status}\n${text}`;
+    if (res.ok) {
+      const json = JSON.parse(text);
+      employees = json.employees || [];
+    }
   } catch (e) {
     employeesEl.value = `خطا: ${e}`;
   }
@@ -629,6 +651,49 @@ async function renderTestScreen() {
     } finally {
       testSubmitExpenseBtn.disabled = false;
       testSubmitExpenseBtn.textContent = 'ثبت هزینه‌ی تستی';
+    }
+  });
+
+  // --- فرم تست submit-charge ---
+  // فقط اگه get-employees موفق بود (یعنی کاربر فعلی owner همین شرکته) نمایش داده می‌شه —
+  // برای کاربر employee این بخش مخفی می‌مونه چون submit-charge روش 403 می‌ده.
+  if (employees.length > 0) {
+    testEmployeeSelect.innerHTML = employees
+      .map(e => `<option value="${e.company_member_id}">${e.name} (${e.role}) — موجودی فعلی: ${e.balance}</option>`)
+      .join('');
+    chargeFormRow.style.display = 'flex';
+  }
+
+  testSubmitChargeBtn.addEventListener('click', async () => {
+    const amount = Number(testChargeAmount.value);
+    if (!amount || amount <= 0) {
+      showToast('مبلغ معتبر وارد کن');
+      return;
+    }
+    const targetId = testEmployeeSelect.value;
+    testSubmitChargeBtn.disabled = true;
+    testSubmitChargeBtn.textContent = 'در حال ارسال...';
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/submit-charge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: tg.initData,
+          company_id: firstCompany.company_id,
+          target_company_member_id: targetId,
+          amount: amount,
+          description: 'تست دستی از صفحه‌ی test',
+        }),
+      });
+      const text = await res.text();
+      const timestamp = new Date().toLocaleTimeString('fa-IR');
+      chargeLogEl.value = `[${timestamp}] گیرنده: ${targetId} | مبلغ: ${amount} | HTTP ${res.status}\n${text}\n\n` + chargeLogEl.value;
+    } catch (e) {
+      chargeLogEl.value = `خطا: ${e}\n\n` + chargeLogEl.value;
+    } finally {
+      testSubmitChargeBtn.disabled = false;
+      testSubmitChargeBtn.textContent = 'ثبت شارژ تستی';
     }
   });
 }
