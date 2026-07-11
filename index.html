@@ -623,9 +623,9 @@ async function renderTestScreen() {
       });
       const text = await res.text();
       const timestamp = new Date().toLocaleTimeString('fa-IR');
-      expenseLogEl.value += `[${timestamp}] مبلغ: ${amount} | HTTP ${res.status}\n${text}\n\n` + expenseLogEl.value;
+      expenseLogEl.value = `[${timestamp}] مبلغ: ${amount} | HTTP ${res.status}\n${text}\n\n` + expenseLogEl.value;
     } catch (e) {
-      expenseLogEl.value += `خطا: ${e}\n\n` + expenseLogEl.value;
+      expenseLogEl.value = `خطا: ${e}\n\n` + expenseLogEl.value;
     } finally {
       testSubmitExpenseBtn.disabled = false;
       testSubmitExpenseBtn.textContent = 'ثبت هزینه‌ی تستی';
