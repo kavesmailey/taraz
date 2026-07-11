@@ -67,11 +67,11 @@
   }
   .ledger-row:focus-within { border-color: var(--gold); }
   .ledger-row label { font-size: 13px; color: var(--ink-soft); font-weight: 600; }
-  .ledger-row input[type=text], .ledger-row textarea {
+  .ledger-row input[type=text], .ledger-row input[type=number], .ledger-row textarea, .ledger-row select {
     border: none; background: transparent; font-size: 16px; color: var(--ink);
     font-family: 'Vazirmatn', Tahoma, sans-serif; resize: none; padding: 0;
   }
-  .ledger-row input:focus, .ledger-row textarea:focus { outline: none; }
+  .ledger-row input:focus, .ledger-row textarea:focus, .ledger-row select:focus { outline: none; }
 
   .tag-list { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
   .tag-chip {
@@ -128,10 +128,17 @@
   }
   .toast.show { transform: translateY(0); opacity: 1; }
 
-  #rawInitData, #companiesResponse, #tagsResponse, #employeesResponse {
+  #rawInitData, #companiesResponse, #tagsResponse, #employeesResponse, #expenseLog {
     width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--paper-raised); font-family: monospace;
   }
+
+  .test-btn {
+    width: 100%; padding: 12px; border: none; border-radius: 10px;
+    background: var(--ink); color: var(--paper); font-family: inherit;
+    font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 10px;
+  }
+  .test-btn:disabled { opacity: .5; cursor: default; }
 
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; }
@@ -157,8 +164,8 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ فقط get-companies، get-tags و get-employees واقعاً ساخته و دیپلوی شده‌اند.
-// بقیه‌ی endpoint های زیر (submit-expense, submit-petty-cash-request,
+// ⚠️ فقط get-companies، get-tags، get-employees و submit-expense واقعاً
+// ساخته و دیپلوی شده‌اند. بقیه‌ی endpoint های زیر (submit-petty-cash-request,
 // submit-charge, ...) هنوز ساخته نشده‌اند — فراخوانی‌شون فعلاً fail می‌شود
 // و به داده‌ی دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
@@ -330,7 +337,6 @@ async function renderExpenseScreen() {
       amount: Number(amount),
       tag_id: selectedTag,
       description: document.getElementById('description').value,
-      receipt_base64: receiptBase64,
     });
     if (result) {
       tg ? tg.close() : showToast('هزینه ثبت شد ✅');
@@ -460,7 +466,8 @@ async function renderChargeScreen() {
 
 // ===================================================================
 // صفحه: تست اتصال — زنجیره‌ی واقعی get-companies -> get-tags -> get-employees
-// بدون داده‌ی دمو — نتیجه‌ی خام هر سه سرور مستقیم نشان داده می‌شود.
+// به‌علاوه یک فرم واقعی برای submit-expense که می‌شود چندبار پشت‌سرهم زد
+// (مثلاً برای تست منفی‌شدن موجودی). بدون داده‌ی دمو.
 // ===================================================================
 async function renderTestScreen() {
   app.innerHTML = `
@@ -482,13 +489,25 @@ async function renderTestScreen() {
     </div>
 
     <div class="ledger-row">
-      <label>پاسخ get-tags (برای اولین شرکت لیست‌شده)</label>
+      <label>پاسخ get-tags</label>
       <textarea id="tagsResponse" rows="6" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
 
     <div class="ledger-row">
-      <label>پاسخ get-employees (برای اولین شرکت لیست‌شده)</label>
+      <label>پاسخ get-employees</label>
       <textarea id="employeesResponse" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
+
+    <div class="ledger-row" id="expenseFormRow" style="display:none">
+      <label>🧪 تست submit-expense</label>
+      <select id="testTagSelect" style="margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;"></select>
+      <input id="testAmount" type="number" placeholder="مبلغ (تومان)" style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:8px;" />
+      <button id="testSubmitExpenseBtn" class="test-btn">ثبت هزینه‌ی تستی</button>
+    </div>
+
+    <div class="ledger-row">
+      <label>لاگ submit-expense (هر تست یک خط اضافه می‌شود)</label>
+      <textarea id="expenseLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
   `;
 
@@ -497,6 +516,11 @@ async function renderTestScreen() {
   const companiesEl = document.getElementById('companiesResponse');
   const tagsEl = document.getElementById('tagsResponse');
   const employeesEl = document.getElementById('employeesResponse');
+  const expenseLogEl = document.getElementById('expenseLog');
+  const expenseFormRow = document.getElementById('expenseFormRow');
+  const testTagSelect = document.getElementById('testTagSelect');
+  const testAmount = document.getElementById('testAmount');
+  const testSubmitExpenseBtn = document.getElementById('testSubmitExpenseBtn');
 
   initDataEl.value = tg?.initData || '(بیرون از تلگرام هستید — initData خالی است)';
 
@@ -526,13 +550,14 @@ async function renderTestScreen() {
   }
 
   if (companies.length === 0) {
-    statusEl.textContent = '⚠️ get-companies موفق بود ولی هیچ شرکتی برنگشت — بقیه‌ی تست‌ها صدا زده نمی‌شوند.';
+    statusEl.textContent = '⚠️ get-companies موفق بود ولی هیچ شرکتی برنگشت.';
     tagsEl.value = '(شرکتی برای تست وجود ندارد)';
     employeesEl.value = '(شرکتی برای تست وجود ندارد)';
     return;
   }
 
   const firstCompany = companies[0];
+  let tags = [];
 
   // مرحله ۲: get-tags
   try {
@@ -543,13 +568,15 @@ async function renderTestScreen() {
     });
     const text = await res.text();
     tagsEl.value = `شرکت: ${firstCompany.name} (${firstCompany.company_id})\nHTTP ${res.status}\n${text}`;
+    if (res.ok) {
+      const json = JSON.parse(text);
+      tags = json.tags || [];
+    }
   } catch (e) {
     tagsEl.value = `خطا: ${e}`;
   }
 
-  // مرحله ۳: get-employees
-  // نکته: اگه کاربر فعلی role اش owner نباشه، انتظار می‌ره 403 برگردونه —
-  // این طبیعیه، نشونه‌ی خرابی نیست (فقط owner مجاز به دیدن این لیسته).
+  // مرحله ۳: get-employees (ممکنه 403 بده اگه کاربر owner نباشه — طبیعیه)
   try {
     const res = await fetch(`${API_BASE_URL}/get-employees`, {
       method: 'POST',
@@ -558,11 +585,52 @@ async function renderTestScreen() {
     });
     const text = await res.text();
     employeesEl.value = `شرکت: ${firstCompany.name} (${firstCompany.company_id})\nHTTP ${res.status}\n${text}`;
-    statusEl.textContent = res.ok ? '✅ هر سه endpoint موفق بودند' : `⚠️ get-employees پاسخ ${res.status} داد (اگه 403 بود و کاربر owner نیست، طبیعیه)`;
   } catch (e) {
     employeesEl.value = `خطا: ${e}`;
-    statusEl.textContent = '❌ get-employees fail شد';
   }
+
+  statusEl.textContent = '✅ آماده برای تست submit-expense — پایین صفحه رو ببین';
+
+  // --- فرم تست submit-expense ---
+  if (tags.length > 0) {
+    testTagSelect.innerHTML = tags.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  } else {
+    testTagSelect.innerHTML = `<option value="">(بدون تگ)</option>`;
+  }
+  expenseFormRow.style.display = 'flex';
+
+  testSubmitExpenseBtn.addEventListener('click', async () => {
+    const amount = Number(testAmount.value);
+    if (!amount || amount <= 0) {
+      showToast('مبلغ معتبر وارد کن');
+      return;
+    }
+    const tagId = testTagSelect.value || null;
+    testSubmitExpenseBtn.disabled = true;
+    testSubmitExpenseBtn.textContent = 'در حال ارسال...';
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/submit-expense`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: tg.initData,
+          company_id: firstCompany.company_id,
+          tag_id: tagId,
+          amount: amount,
+          description: 'تست دستی از صفحه‌ی test',
+        }),
+      });
+      const text = await res.text();
+      const timestamp = new Date().toLocaleTimeString('fa-IR');
+      expenseLogEl.value += `[${timestamp}] مبلغ: ${amount} | HTTP ${res.status}\n${text}\n\n` + expenseLogEl.value;
+    } catch (e) {
+      expenseLogEl.value += `خطا: ${e}\n\n` + expenseLogEl.value;
+    } finally {
+      testSubmitExpenseBtn.disabled = false;
+      testSubmitExpenseBtn.textContent = 'ثبت هزینه‌ی تستی';
+    }
+  });
 }
 
 // ===================================================================
