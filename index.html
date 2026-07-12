@@ -206,8 +206,8 @@ function formatNumber(n) {
   return Number(n).toLocaleString('en-US');
 }
 
-// ارقام فارسی/عربی را به لاتین تبدیل می‌کند — لازم چون بعضی کیبوردهای فارسی
-// حتی با inputmode="numeric" ارقام فارسی می‌فرستند، نه لاتین.
+// ارقام فارسی/عربی را به لاتین تبدیل می‌کند — برای وقتی می‌خواهیم مقدار را
+// به سرور بفرستیم (Number(...) فقط ارقام لاتین را می‌فهمد).
 function toWesternDigits(str) {
   const persian = '۰۱۲۳۴۵۶۷۸۹';
   const arabic = '٠١٢٣٤٥٦٧٨٩';
@@ -220,13 +220,28 @@ function toWesternDigits(str) {
   });
 }
 
-// قانون ورودی‌های عددی توی این فایل: type="tel" + inputmode="numeric"
-// + این تابع روی رویداد input، تا هم کیبورد عددی باز بشه هم ارقام فارسی/عربی
-// قبول بشه. این تابع را روی هر input عددی جدید هم صدا بزن.
+// ارقام لاتین را به فارسی تبدیل می‌کند — برای نمایش توی کادر ورودی.
+function toPersianDigits(str) {
+  const persian = '۰۱۲۳۴۵۶۷۸۹';
+  return str.replace(/[0-9]/g, (d) => persian[Number(d)]);
+}
+
+// قانون ورودی‌های عددی توی این فایل: type="tel" + inputmode="numeric" +
+// این تابع روی رویداد input. کاربر با هر کیبوردی تایپ کنه (فارسی یا انگلیسی)،
+// همیشه ارقام فارسی توی کادر نمایش داده می‌شه — چون این یه اپ فارسیه.
+// موقع خوندن مقدار برای فرستادن به سرور، حتماً باید از toWesternDigits رد بشه
+// (چون Number('۵۰۰۰') در جاوااسکریپت NaN می‌ده، نه 5000).
 function sanitizeNumericInput(inputEl) {
   inputEl.addEventListener('input', (e) => {
-    e.target.value = toWesternDigits(e.target.value).replace(/[^\d]/g, '');
+    const westernDigitsOnly = toWesternDigits(e.target.value).replace(/[^\d]/g, '');
+    e.target.value = toPersianDigits(westernDigitsOnly);
   });
+}
+
+// مقدار یک ورودی عددی (که رقم‌های فارسی نمایش می‌ده) را به عدد قابل‌استفاده
+// برای سرور تبدیل می‌کند. همه‌جا به‌جای Number(el.value) از این استفاده کن.
+function readNumericInput(inputEl) {
+  return Number(toWesternDigits(inputEl.value));
 }
 
 async function callBackend(endpoint, payload) {
@@ -345,8 +360,8 @@ async function renderExpenseScreen() {
   });
 
   setupMainButton('ثبت هزینه', async () => {
-    const amount = document.getElementById('amount').value;
-    if (!amount || Number(amount) <= 0) {
+    const amount = readNumericInput(document.getElementById('amount'));
+    if (!amount || amount <= 0) {
       tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
       return;
     }
@@ -355,7 +370,7 @@ async function renderExpenseScreen() {
       return;
     }
     const result = await callBackend('submit-expense', {
-      amount: Number(amount),
+      amount: amount,
       tag_id: selectedTag,
       description: document.getElementById('description').value,
     });
@@ -394,13 +409,13 @@ async function renderRequestScreen() {
   sanitizeNumericInput(document.getElementById('amount'));
 
   setupMainButton('ارسال درخواست', async () => {
-    const amount = document.getElementById('amount').value;
-    if (!amount || Number(amount) <= 0) {
+    const amount = readNumericInput(document.getElementById('amount'));
+    if (!amount || amount <= 0) {
       tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
       return;
     }
     const result = await callBackend('submit-petty-cash-request', {
-      amount: Number(amount),
+      amount: amount,
       description: document.getElementById('description').value,
     });
     if (result) {
@@ -462,14 +477,14 @@ async function renderChargeScreen() {
     document.getElementById('chargeAmount').focus();
     sanitizeNumericInput(document.getElementById('chargeAmount'));
     setupMainButton('ثبت شارژ', async () => {
-      const amount = document.getElementById('chargeAmount').value;
-      if (!amount || Number(amount) <= 0) {
+      const amount = readNumericInput(document.getElementById('chargeAmount'));
+      if (!amount || amount <= 0) {
         tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
         return;
       }
       const result = await callBackend('submit-charge', {
         employee_id: selectedEmployee.id,
-        amount: Number(amount),
+        amount: amount,
         description: document.getElementById('chargeDescription').value,
       });
       if (result) {
@@ -657,7 +672,7 @@ async function renderTestScreen() {
   sanitizeNumericInput(testAmount);
 
   testSubmitExpenseBtn.addEventListener('click', async () => {
-    const amount = Number(testAmount.value);
+    const amount = readNumericInput(testAmount);
     if (!amount || amount <= 0) {
       showToast('مبلغ معتبر وارد کن');
       return;
@@ -701,7 +716,7 @@ async function renderTestScreen() {
   }
 
   testSubmitChargeBtn.addEventListener('click', async () => {
-    const amount = Number(testChargeAmount.value);
+    const amount = readNumericInput(testChargeAmount);
     if (!amount || amount <= 0) {
       showToast('مبلغ معتبر وارد کن');
       return;
@@ -737,7 +752,7 @@ async function renderTestScreen() {
   sanitizeNumericInput(testRequestAmount);
 
   testSubmitRequestBtn.addEventListener('click', async () => {
-    const amount = Number(testRequestAmount.value);
+    const amount = readNumericInput(testRequestAmount);
     if (!amount || amount <= 0) {
       showToast('مبلغ معتبر وارد کن');
       return;
