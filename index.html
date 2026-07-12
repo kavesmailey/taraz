@@ -164,8 +164,8 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ فقط get-companies، get-tags، get-employees، submit-expense و
-// submit-charge واقعاً ساخته و دیپلوی شده‌اند. submit-petty-cash-request
+// ⚠️ get-companies، get-tags، get-employees، submit-expense، submit-charge
+// و submit-petty-cash-request همگی ساخته و دیپلوی شده‌اند. submit-settlement
 // هنوز ساخته نشده — فراخوانیش فعلاً fail می‌شود و به داده‌ی دمو (DEMO_*)
 // سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
@@ -521,6 +521,17 @@ async function renderTestScreen() {
       <label>لاگ submit-charge (هر تست یک خط اضافه می‌شود)</label>
       <textarea id="chargeLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
+
+    <div class="ledger-row">
+      <label>🧪 تست submit-petty-cash-request</label>
+      <input id="testRequestAmount" type="number" placeholder="مبلغ درخواستی (تومان)" style="margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:8px;" />
+      <button id="testSubmitRequestBtn" class="test-btn">ثبت درخواست تستی</button>
+    </div>
+
+    <div class="ledger-row">
+      <label>لاگ submit-petty-cash-request (هر تست یک خط اضافه می‌شود)</label>
+      <textarea id="requestLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
+    </div>
   `;
 
   const initDataEl = document.getElementById('rawInitData');
@@ -538,6 +549,9 @@ async function renderTestScreen() {
   const testEmployeeSelect = document.getElementById('testEmployeeSelect');
   const testChargeAmount = document.getElementById('testChargeAmount');
   const testSubmitChargeBtn = document.getElementById('testSubmitChargeBtn');
+  const requestLogEl = document.getElementById('requestLog');
+  const testRequestAmount = document.getElementById('testRequestAmount');
+  const testSubmitRequestBtn = document.getElementById('testSubmitRequestBtn');
 
   initDataEl.value = tg?.initData || '(بیرون از تلگرام هستید — initData خالی است)';
 
@@ -694,6 +708,38 @@ async function renderTestScreen() {
     } finally {
       testSubmitChargeBtn.disabled = false;
       testSubmitChargeBtn.textContent = 'ثبت شارژ تستی';
+    }
+  });
+
+  // --- فرم تست submit-petty-cash-request ---
+  testSubmitRequestBtn.addEventListener('click', async () => {
+    const amount = Number(testRequestAmount.value);
+    if (!amount || amount <= 0) {
+      showToast('مبلغ معتبر وارد کن');
+      return;
+    }
+    testSubmitRequestBtn.disabled = true;
+    testSubmitRequestBtn.textContent = 'در حال ارسال...';
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/submit-petty-cash-request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          initData: tg.initData,
+          company_id: firstCompany.company_id,
+          amount: amount,
+          description: 'تست دستی از صفحه‌ی test',
+        }),
+      });
+      const text = await res.text();
+      const timestamp = new Date().toLocaleTimeString('fa-IR');
+      requestLogEl.value = `[${timestamp}] مبلغ: ${amount} | HTTP ${res.status}\n${text}\n\n` + requestLogEl.value;
+    } catch (e) {
+      requestLogEl.value = `خطا: ${e}\n\n` + requestLogEl.value;
+    } finally {
+      testSubmitRequestBtn.disabled = false;
+      testSubmitRequestBtn.textContent = 'ثبت درخواست تستی';
     }
   });
 }
