@@ -244,30 +244,32 @@ function readNumericInput(inputEl) {
   return Number(toWesternDigits(inputEl.value));
 }
 
-async function callBackend(endpoint, payload) {
+// همه‌ی Edge Function های ما فقط POST قبول می‌کنن — یک تابع واحد برای همه.
+async function apiPost(endpoint, payload) {
   try {
     const res = await fetch(`${API_BASE_URL}/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ initData: tg?.initData || null, ...payload })
     });
-    if (!res.ok) throw new Error('bad response');
+    if (!res.ok) throw new Error('bad response: ' + res.status);
     return await res.json();
   } catch (e) {
-    console.warn('backend not reachable yet:', e);
+    console.warn(`apiPost(${endpoint}) failed:`, e);
     return null;
   }
 }
 
-async function fetchBackend(endpoint) {
-  try {
-    const url = `${API_BASE_URL}/${endpoint}?initData=${encodeURIComponent(tg?.initData || '')}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('bad response');
-    return await res.json();
-  } catch (e) {
-    return null;
-  }
+// چون هنوز چندشرکتی (multi-company) نداریم (Phase 5.8، ساخته نشده)، همیشه اولین
+// شرکتی که get-companies برمی‌گردونه رو به عنوان شرکت فعال کاربر در نظر می‌گیریم.
+let cachedCompanyId = null;
+async function getMyCompanyId() {
+  if (cachedCompanyId) return cachedCompanyId;
+  const result = await apiPost('get-companies', {});
+  const companies = result?.companies || [];
+  if (companies.length === 0) return null;
+  cachedCompanyId = companies[0].company_id;
+  return cachedCompanyId;
 }
 
 // --- داده‌ی نمایشی برای پیش‌نمایش، تا زمان ساخته‌شدن بقیه‌ی Edge Function ها ---
@@ -280,10 +282,10 @@ const DEMO_TAGS = [
 ];
 const DEMO_BALANCE = 850000;
 const DEMO_EMPLOYEES = [
-  { id: 'u1', name: 'علی محمدی', balance: 850000 },
-  { id: 'u2', name: 'سارا احمدی', balance: 120000 },
-  { id: 'u3', name: 'رضا کریمی', balance: -50000 },
-  { id: 'u4', name: 'مریم رضایی', balance: 0 },
+  { company_member_id: 'u1', name: 'علی محمدی', balance: 850000 },
+  { company_member_id: 'u2', name: 'سارا احمدی', balance: 120000 },
+  { company_member_id: 'u3', name: 'رضا کریمی', balance: -50000 },
+  { company_member_id: 'u4', name: 'مریم رضایی', balance: 0 },
 ];
 
 const app = document.getElementById('app');
@@ -293,8 +295,10 @@ const screen = new URLSearchParams(location.search).get('screen') || 'expense';
 // صفحه: ثبت هزینه
 // ===================================================================
 async function renderExpenseScreen() {
-  const tagsData = (await fetchBackend('get-tags')) || DEMO_TAGS;
-  const balance = DEMO_BALANCE; // در آینده از fetchBackend('balance') گرفته می‌شود
+  const companyId = await getMyCompanyId();
+  const tagsResult = companyId ? await apiPost('get-tags', { company_id: companyId }) : null;
+  const tagsData = tagsResult?.tags || DEMO_TAGS;
+  const balance = DEMO_BALANCE; // در آینده از یک endpoint موجودی گرفته می‌شود
 
   let selectedTag = null;
   let receiptBase64 = null;
@@ -369,7 +373,12 @@ async function renderExpenseScreen() {
       tg ? tg.showAlert('یک تگ انتخاب کنید') : showToast('یک تگ انتخاب کنید');
       return;
     }
-    const result = await callBackend('submit-expense', {
+    if (!companyId) {
+      showToast('عضو هیچ شرکتی نیستید');
+      return;
+    }
+    const result = await apiPost('submit-expense', {
+      company_id: companyId,
       amount: amount,
       tag_id: selectedTag,
       description: document.getElementById('description').value,
@@ -386,6 +395,7 @@ async function renderExpenseScreen() {
 // صفحه: درخواست تنخواه
 // ===================================================================
 async function renderRequestScreen() {
+  const companyId = await getMyCompanyId();
   const balance = DEMO_BALANCE;
   app.innerHTML = `
     <div class="screen-title">💵 درخواست تنخواه</div>
@@ -414,7 +424,12 @@ async function renderRequestScreen() {
       tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
       return;
     }
-    const result = await callBackend('submit-petty-cash-request', {
+    if (!companyId) {
+      showToast('عضو هیچ شرکتی نیستید');
+      return;
+    }
+    const result = await apiPost('submit-petty-cash-request', {
+      company_id: companyId,
       amount: amount,
       description: document.getElementById('description').value,
     });
@@ -430,7 +445,9 @@ async function renderRequestScreen() {
 // صفحه: شارژ تنخواه (مدیر مالی)
 // ===================================================================
 async function renderChargeScreen() {
-  const employees = (await fetchBackend('get-employees')) || DEMO_EMPLOYEES;
+  const companyId = await getMyCompanyId();
+  const employeesResult = companyId ? await apiPost('get-employees', { company_id: companyId }) : null;
+  const employees = employeesResult?.employees || DEMO_EMPLOYEES;
 
   app.innerHTML = `
     <div class="screen-title">💰 شارژ تنخواه</div>
@@ -482,8 +499,13 @@ async function renderChargeScreen() {
         tg ? tg.showAlert('مبلغ را وارد کنید') : showToast('مبلغ را وارد کنید');
         return;
       }
-      const result = await callBackend('submit-charge', {
-        employee_id: selectedEmployee.id,
+      if (!companyId) {
+        showToast('عضو هیچ شرکتی نیستید');
+        return;
+      }
+      const result = await apiPost('submit-charge', {
+        company_id: companyId,
+        target_company_member_id: selectedEmployee.company_member_id,
         amount: amount,
         description: document.getElementById('chargeDescription').value,
       });
