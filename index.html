@@ -151,6 +151,7 @@
 <div id="app"></div>
 <div id="toast" class="toast"></div>
 <div id="previewSwitch" class="preview-switch" style="display:none">
+  <button onclick="location.search='?screen=home'">خانه</button>
   <button onclick="location.search='?screen=expense'">ثبت هزینه</button>
   <button onclick="location.search='?screen=request'">درخواست تنخواه</button>
   <button onclick="location.search='?screen=charge'">شارژ (مدیر مالی)</button>
@@ -289,7 +290,7 @@ const DEMO_EMPLOYEES = [
 ];
 
 const app = document.getElementById('app');
-const screen = new URLSearchParams(location.search).get('screen') || 'expense';
+const screen = new URLSearchParams(location.search).get('screen') || 'home';
 
 // ===================================================================
 // صفحه: ثبت هزینه
@@ -829,12 +830,44 @@ function setupMainButton(label, onClick) {
 }
 
 // ===================================================================
+// صفحه: خانه — مقصد پیش‌فرض Menu Button تلگرام (آیکون کنار اتچمنت).
+// چون Menu Button فقط می‌تونه یک URL ثابت باز کنه (نه پیام inline تلگرام)،
+// این صفحه همون نقش «منو» رو داخل خود WebApp بازی می‌کنه.
+// ===================================================================
+function renderHomeScreen() {
+  app.innerHTML = `
+    <div class="screen-title">تنخواه 👋</div>
+    <div class="ledger-row" style="border:none;">
+      <button id="homeExpenseBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">🧾 ثبت هزینه</button>
+      <button id="homeRequestBtn" class="test-btn" style="background:var(--ink);margin-bottom:10px;">💵 درخواست تنخواه</button>
+      <button id="homeSettingsBtn" class="test-btn" style="background:var(--ink-soft);">⚙️ تنظیمات</button>
+    </div>
+  `;
+  document.getElementById('homeExpenseBtn').addEventListener('click', () => {
+    location.search = '?screen=expense';
+  });
+  document.getElementById('homeRequestBtn').addEventListener('click', () => {
+    location.search = '?screen=request';
+  });
+  document.getElementById('homeSettingsBtn').addEventListener('click', () => {
+    // بات username موقتیه، طبق گفته‌ی کاوه بعداً عوض می‌شه — اونجا این خط رو هم آپدیت کن.
+    const settingsDeepLink = 'https://t.me/tarazofficialbot?start=settings';
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink(settingsDeepLink);
+    } else {
+      window.open(settingsDeepLink, '_blank');
+    }
+  });
+}
+
+// ===================================================================
 // اجرای صفحه‌ی مناسب بر اساس پارامتر screen
 // ===================================================================
 if (screen === 'request') renderRequestScreen();
 else if (screen === 'charge') renderChargeScreen();
 else if (screen === 'test') renderTestScreen();
-else renderExpenseScreen();
+else if (screen === 'expense') renderExpenseScreen();
+else renderHomeScreen();
 </script>
 </body>
 </html>
