@@ -263,14 +263,18 @@ async function apiPost(endpoint, payload) {
 
 // چون هنوز چندشرکتی (multi-company) نداریم (Phase 5.8، ساخته نشده)، همیشه اولین
 // شرکتی که get-companies برمی‌گردونه رو به عنوان شرکت فعال کاربر در نظر می‌گیریم.
-let cachedCompanyId = null;
-async function getMyCompanyId() {
-  if (cachedCompanyId) return cachedCompanyId;
+let cachedCompany = null;
+async function getMyCompanyInfo() {
+  if (cachedCompany) return cachedCompany;
   const result = await apiPost('get-companies', {});
   const companies = result?.companies || [];
   if (companies.length === 0) return null;
-  cachedCompanyId = companies[0].company_id;
-  return cachedCompanyId;
+  cachedCompany = companies[0];
+  return cachedCompany;
+}
+async function getMyCompanyId() {
+  const info = await getMyCompanyInfo();
+  return info?.company_id ?? null;
 }
 
 // --- داده‌ی نمایشی برای پیش‌نمایش، تا زمان ساخته‌شدن بقیه‌ی Edge Function ها ---
@@ -448,6 +452,20 @@ async function renderRequestScreen() {
 async function renderChargeScreen() {
   const companyId = await getMyCompanyId();
   const employeesResult = companyId ? await apiPost('get-employees', { company_id: companyId }) : null;
+
+  // داخل تلگرام واقعی، شکست get-employees معمولاً یعنی owner نیستی (403) —
+  // نباید بی‌صدا بریم رو داده‌ی دمو، چون گمراه‌کننده‌ست. فقط توی پیش‌نمایش
+  // بیرون از تلگرام (برای دیزاین) دمو نشون داده می‌شه.
+  if (isInsideTelegram && !employeesResult) {
+    app.innerHTML = `
+      <div class="screen-title">💰 شارژ تنخواه</div>
+      <div class="ledger-row" style="border:none;text-align:center;color:var(--danger);padding-top:24px;">
+        شما به این بخش دسترسی ندارید. فقط مالک شرکت می‌تواند تنخواه شارژ کند.
+      </div>
+    `;
+    return;
+  }
+
   const employees = employeesResult?.employees || DEMO_EMPLOYEES;
 
   app.innerHTML = `
@@ -834,12 +852,16 @@ function setupMainButton(label, onClick) {
 // چون Menu Button فقط می‌تونه یک URL ثابت باز کنه (نه پیام inline تلگرام)،
 // این صفحه همون نقش «منو» رو داخل خود WebApp بازی می‌کنه.
 // ===================================================================
-function renderHomeScreen() {
+async function renderHomeScreen() {
+  const companyInfo = isInsideTelegram ? await getMyCompanyInfo() : null;
+  const isOwner = companyInfo?.role === 'owner';
+
   app.innerHTML = `
     <div class="screen-title">تنخواه 👋</div>
     <div class="ledger-row" style="border:none;">
       <button id="homeExpenseBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">🧾 ثبت هزینه</button>
       <button id="homeRequestBtn" class="test-btn" style="background:var(--ink);margin-bottom:10px;">💵 درخواست تنخواه</button>
+      ${isOwner ? '<button id="homeChargeBtn" class="test-btn" style="background:var(--success);margin-bottom:10px;">💰 شارژ تنخواه</button>' : ''}
       <button id="homeSettingsBtn" class="test-btn" style="background:var(--ink-soft);">⚙️ تنظیمات</button>
     </div>
   `;
@@ -849,6 +871,11 @@ function renderHomeScreen() {
   document.getElementById('homeRequestBtn').addEventListener('click', () => {
     location.search = '?screen=request';
   });
+  if (isOwner) {
+    document.getElementById('homeChargeBtn').addEventListener('click', () => {
+      location.search = '?screen=charge';
+    });
+  }
   document.getElementById('homeSettingsBtn').addEventListener('click', () => {
     // بات username موقتیه، طبق گفته‌ی کاوه بعداً عوض می‌شه — اونجا این خط رو هم آپدیت کن.
     const settingsDeepLink = 'https://t.me/tarazofficialbot?start=settings';
