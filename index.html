@@ -165,10 +165,10 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ get-companies، get-tags، get-employees، submit-expense، submit-charge
-// و submit-petty-cash-request همگی ساخته و دیپلوی شده‌اند. submit-settlement
-// هنوز ساخته نشده — فراخوانیش فعلاً fail می‌شود و به داده‌ی دمو (DEMO_*)
-// سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
+// ⚠️ get-companies، get-tags، get-employees، submit-expense، submit-charge،
+// submit-petty-cash-request، create-company و invite-member همگی ساخته و
+// دیپلوی شده‌اند. submit-settlement هنوز ساخته نشده — فراخوانیش فعلاً fail
+// می‌شود و به داده‌ی دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -877,12 +877,87 @@ async function renderHomeScreen() {
     });
   }
   document.getElementById('homeSettingsBtn').addEventListener('click', () => {
-    // بات username موقتیه، طبق گفته‌ی کاوه بعداً عوض می‌شه — اونجا این خط رو هم آپدیت کن.
-    const settingsDeepLink = 'https://t.me/tarazofficialbot?start=settings';
-    if (tg && tg.openTelegramLink) {
-      tg.openTelegramLink(settingsDeepLink);
+    location.search = '?screen=settings';
+  });
+}
+
+// ===================================================================
+// صفحه: تنظیمات — جایگزین کامل «/start settings» که کار نکرد.
+// اگه owner شرکتی نباشی: فرم ساخت شرکت. اگه owner باشی: فرم دعوت کارمند.
+// ===================================================================
+async function renderSettingsScreen() {
+  app.innerHTML = `<div class="screen-title">⚙️ تنظیمات</div><div id="settingsBody">در حال بارگذاری...</div>`;
+  const bodyEl = document.getElementById('settingsBody');
+
+  if (!isInsideTelegram) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">این صفحه فقط داخل تلگرام کار می‌کند.</div>`;
+    return;
+  }
+
+  const companyInfo = await getMyCompanyInfo();
+
+  if (!companyInfo) {
+    // کاربر مالک هیچ شرکتی نیست → فرم ساخت شرکت
+    bodyEl.innerHTML = `
+      <div class="ledger-row">
+        <label>اسم شرکت</label>
+        <input id="companyNameInput" type="text" placeholder="مثلاً: فروشگاه من" />
+      </div>
+      <button id="createCompanyBtn" class="test-btn" style="background:var(--gold);margin-top:14px;">ساخت شرکت</button>
+      <div id="settingsMsg" style="margin-top:10px;font-size:13px;"></div>
+    `;
+    document.getElementById('createCompanyBtn').addEventListener('click', async () => {
+      const name = document.getElementById('companyNameInput').value.trim();
+      const msgEl = document.getElementById('settingsMsg');
+      if (!name) { msgEl.textContent = 'اسم شرکت رو وارد کن.'; return; }
+      msgEl.textContent = 'در حال ساخت...';
+      const result = await apiPost('create-company', { company_name: name });
+      if (result?.company_id) {
+        cachedCompany = null; // کش قبلی (خالی) رو پاک کن تا دفعه‌ی بعد دوباره چک بشه
+        msgEl.style.color = 'var(--success)';
+        msgEl.textContent = 'شرکت ساخته شد ✅';
+        setTimeout(() => { location.search = '?screen=home'; }, 900);
+      } else {
+        msgEl.style.color = 'var(--danger)';
+        msgEl.textContent = 'خطا در ساخت شرکت. دوباره امتحان کن.';
+      }
+    });
+    return;
+  }
+
+  if (companyInfo.role !== 'owner') {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">فقط مالک شرکت می‌تواند کاربر دعوت کند.</div>`;
+    return;
+  }
+
+  // owner یه شرکته → فرم دعوت کارمند
+  bodyEl.innerHTML = `
+    <div class="ledger-row">
+      <label>شماره‌ی کارمند</label>
+      <input id="invitePhoneInput" type="tel" inputmode="numeric" placeholder="09xxxxxxxxx" />
+    </div>
+    <button id="inviteBtn" class="test-btn" style="background:var(--gold);margin-top:14px;">دعوت کارمند</button>
+    <div id="settingsMsg" style="margin-top:10px;font-size:13px;"></div>
+  `;
+  sanitizeNumericInput(document.getElementById('invitePhoneInput'));
+  document.getElementById('inviteBtn').addEventListener('click', async () => {
+    const phone = readNumericInput(document.getElementById('invitePhoneInput'));
+    const msgEl = document.getElementById('settingsMsg');
+    if (!phone) { msgEl.textContent = 'شماره رو وارد کن.'; return; }
+    msgEl.textContent = 'در حال ارسال...';
+    const result = await apiPost('invite-member', {
+      company_id: companyInfo.company_id,
+      phone_number: String(phone),
+    });
+    if (result?.status === 'added_immediately') {
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = 'این کاربر از قبل ثبت‌نام کرده بود و همین الان اضافه شد ✅';
+    } else if (result?.status === 'pending_invite') {
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = 'دعوت ثبت شد. وقتی اون شخص ثبت‌نام کنه، خودکار اضافه می‌شه ✅';
     } else {
-      window.open(settingsDeepLink, '_blank');
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = 'خطا در ارسال دعوت. دوباره امتحان کن.';
     }
   });
 }
@@ -894,6 +969,7 @@ if (screen === 'request') renderRequestScreen();
 else if (screen === 'charge') renderChargeScreen();
 else if (screen === 'test') renderTestScreen();
 else if (screen === 'expense') renderExpenseScreen();
+else if (screen === 'settings') renderSettingsScreen();
 else renderHomeScreen();
 </script>
 </body>
