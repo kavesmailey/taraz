@@ -165,10 +165,10 @@
 // ===================================================================
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ get-companies، get-tags، get-employees، submit-expense، submit-charge،
-// submit-petty-cash-request، create-company، invite-member،
-// get-registered-expenses و submit-settlement همگی ساخته و دیپلوی شده‌اند.
-// تأیید/رد تسویه توسط مالک هنوز ساخته نشده (منتظر تصمیم طراحی).
+// ⚠️ همه‌ی endpoint های اصلی ساخته شده‌اند: get-companies، get-tags،
+// get-employees، submit-expense، submit-charge، submit-petty-cash-request،
+// create-company، invite-member، get-registered-expenses، submit-settlement،
+// get-settlement-detail، review-settlement.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -1076,6 +1076,99 @@ async function renderSettlementScreen() {
 }
 
 // ===================================================================
+// صفحه: بازبینی تسویه (فقط owner) — ریز هزینه‌های یک تسویه رو نشون می‌ده،
+// پیش‌فرض همه تیک‌خورده (تأیید)، owner می‌تونه تیک هرکدوم رو برداره (رد).
+// ===================================================================
+async function renderSettlementReviewScreen() {
+  app.innerHTML = `<div class="screen-title">🔍 بازبینی تسویه</div><div id="reviewBody">در حال بارگذاری...</div>`;
+  const bodyEl = document.getElementById('reviewBody');
+
+  if (!isInsideTelegram) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">این صفحه فقط داخل تلگرام کار می‌کند.</div>`;
+    return;
+  }
+
+  const settlementId = new URLSearchParams(location.search).get('id');
+  if (!settlementId) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">شناسه‌ی تسویه پیدا نشد.</div>`;
+    return;
+  }
+
+  const result = await apiPost('get-settlement-detail', { settlement_id: settlementId });
+  if (!result?.settlement) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;color:var(--danger);">دسترسی نداری یا این تسویه پیدا نشد.</div>`;
+    return;
+  }
+
+  const { settlement, expenses } = result;
+
+  if (settlement.status !== 'submitted') {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">این تسویه قبلاً بررسی شده (وضعیت: ${settlement.status}).</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = `
+    <div class="ledger-row" style="border:none;">کارمند: ${settlement.employee_name || '—'}</div>
+    <div id="reviewList"></div>
+    <button id="submitReviewBtn" class="test-btn" style="background:var(--gold);margin-top:14px;">ثبت نتیجه‌ی بررسی</button>
+    <div id="reviewMsg" style="margin-top:10px;font-size:13px;"></div>
+  `;
+
+  const listEl = document.getElementById('reviewList');
+  expenses.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'employee-row';
+    const dateStr = new Date(e.created_at).toLocaleDateString('fa-IR');
+    row.innerHTML = `
+      <span class="name">
+        <input type="checkbox" id="rv_${e.id}" checked style="margin-left:8px;" />
+        ${e.tag_name || 'بدون تگ'} — ${dateStr}${e.description ? ' — ' + e.description : ''}
+      </span>
+      <span class="balance">${formatNumber(e.amount)} تومان</span>
+    `;
+    row.addEventListener('click', (ev) => {
+      if (ev.target.tagName !== 'INPUT') {
+        const cb = row.querySelector('input');
+        cb.checked = !cb.checked;
+      }
+    });
+    listEl.appendChild(row);
+  });
+
+  document.getElementById('submitReviewBtn').addEventListener('click', async () => {
+    const msgEl = document.getElementById('reviewMsg');
+    const approved = [];
+    const rejected = [];
+    expenses.forEach(e => {
+      const cb = document.getElementById(`rv_${e.id}`);
+      if (cb.checked) approved.push(e.id); else rejected.push(e.id);
+    });
+
+    const btn = document.getElementById('submitReviewBtn');
+    btn.disabled = true;
+    btn.textContent = 'در حال ثبت...';
+
+    const res = await apiPost('review-settlement', {
+      settlement_id: settlementId,
+      approved_expense_ids: approved,
+      rejected_expense_ids: rejected,
+    });
+
+    if (res?.final_status) {
+      msgEl.style.color = 'var(--success)';
+      const statusFa = { approved: 'تأیید کامل', rejected: 'رد کامل', correction_requested: 'تأیید بخشی' }[res.final_status] || res.final_status;
+      msgEl.textContent = `ثبت شد ✅ — نتیجه: ${statusFa} (${res.approved_count} تأیید، ${res.rejected_count} رد)`;
+      tg ? setTimeout(() => tg.close(), 1600) : setTimeout(() => location.search = '?screen=home', 1600);
+    } else {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = res?.error || 'خطا در ثبت بررسی. دوباره امتحان کن.';
+      btn.disabled = false;
+      btn.textContent = 'ثبت نتیجه‌ی بررسی';
+    }
+  });
+}
+
+// ===================================================================
 // اجرای صفحه‌ی مناسب بر اساس پارامتر screen
 // ===================================================================
 if (screen === 'request') renderRequestScreen();
@@ -1084,6 +1177,7 @@ else if (screen === 'test') renderTestScreen();
 else if (screen === 'expense') renderExpenseScreen();
 else if (screen === 'settings') renderSettingsScreen();
 else if (screen === 'settlement') renderSettlementScreen();
+else if (screen === 'settlement-review') renderSettlementReviewScreen();
 else renderHomeScreen();
 </script>
 </body>
