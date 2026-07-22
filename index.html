@@ -166,9 +166,9 @@
 
 // Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
 // ⚠️ get-companies، get-tags، get-employees، submit-expense، submit-charge،
-// submit-petty-cash-request، create-company و invite-member همگی ساخته و
-// دیپلوی شده‌اند. submit-settlement هنوز ساخته نشده — فراخوانیش فعلاً fail
-// می‌شود و به داده‌ی دمو (DEMO_*) سقوط می‌کند. این یک TODO شناخته‌شده است، نه باگ.
+// submit-petty-cash-request، create-company، invite-member،
+// get-registered-expenses و submit-settlement همگی ساخته و دیپلوی شده‌اند.
+// تأیید/رد تسویه توسط مالک هنوز ساخته نشده (منتظر تصمیم طراحی).
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -861,6 +861,7 @@ async function renderHomeScreen() {
     <div class="ledger-row" style="border:none;">
       <button id="homeExpenseBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">🧾 ثبت هزینه</button>
       <button id="homeRequestBtn" class="test-btn" style="background:var(--ink);margin-bottom:10px;">💵 درخواست تنخواه</button>
+      <button id="homeSettlementBtn" class="test-btn" style="background:var(--danger);margin-bottom:10px;">📋 تسویه هزینه‌ها</button>
       ${isOwner ? '<button id="homeChargeBtn" class="test-btn" style="background:var(--success);margin-bottom:10px;">💰 شارژ تنخواه</button>' : ''}
       <button id="homeSettingsBtn" class="test-btn" style="background:var(--ink-soft);">⚙️ تنظیمات</button>
     </div>
@@ -870,6 +871,9 @@ async function renderHomeScreen() {
   });
   document.getElementById('homeRequestBtn').addEventListener('click', () => {
     location.search = '?screen=request';
+  });
+  document.getElementById('homeSettlementBtn').addEventListener('click', () => {
+    location.search = '?screen=settlement';
   });
   if (isOwner) {
     document.getElementById('homeChargeBtn').addEventListener('click', () => {
@@ -963,6 +967,115 @@ async function renderSettingsScreen() {
 }
 
 // ===================================================================
+// صفحه: تسویه‌ی هزینه‌ها — کارمند هزینه‌های ثبت‌شده‌ی هنوز-تسویه‌نشده‌اش رو
+// می‌بینه، چندتاش رو تیک می‌زنه (یا «انتخاب همه») و می‌فرسته برای بررسی مالک.
+// ===================================================================
+async function renderSettlementScreen() {
+  app.innerHTML = `<div class="screen-title">📋 تسویه‌ی هزینه‌ها</div><div id="settlementBody">در حال بارگذاری...</div>`;
+  const bodyEl = document.getElementById('settlementBody');
+
+  if (!isInsideTelegram) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">این صفحه فقط داخل تلگرام کار می‌کند.</div>`;
+    return;
+  }
+
+  const companyId = await getMyCompanyId();
+  if (!companyId) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">عضو هیچ شرکتی نیستید.</div>`;
+    return;
+  }
+
+  const result = await apiPost('get-registered-expenses', { company_id: companyId });
+  const expenses = result?.expenses || [];
+
+  if (expenses.length === 0) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">هیچ هزینه‌ی تسویه‌نشده‌ای نداری.</div>`;
+    return;
+  }
+
+  const selected = new Set();
+
+  bodyEl.innerHTML = `
+    <button id="selectAllBtn" class="test-btn" style="background:var(--ink-soft);margin-bottom:10px;">انتخاب همه</button>
+    <div id="expenseList"></div>
+    <div class="balance-strip" style="margin-top:14px;">
+      <span class="label">جمع انتخاب‌شده</span>
+      <span class="value" id="selectedTotal">۰ تومان</span>
+    </div>
+    <button id="submitSettlementBtn" class="test-btn" style="background:var(--gold);margin-top:10px;" disabled>ارسال برای تسویه</button>
+    <div id="settlementMsg" style="margin-top:10px;font-size:13px;"></div>
+  `;
+
+  const listEl = document.getElementById('expenseList');
+  const totalEl = document.getElementById('selectedTotal');
+  const submitBtn = document.getElementById('submitSettlementBtn');
+
+  function updateTotal() {
+    let sum = 0;
+    expenses.forEach(e => { if (selected.has(e.id)) sum += Number(e.amount); });
+    totalEl.textContent = `${formatNumber(sum)} تومان`;
+    submitBtn.disabled = selected.size === 0;
+  }
+
+  expenses.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'employee-row';
+    const dateStr = new Date(e.created_at).toLocaleDateString('fa-IR');
+    row.innerHTML = `
+      <span class="name">
+        <input type="checkbox" id="cb_${e.id}" style="margin-left:8px;" />
+        ${e.tag_name || 'بدون تگ'} — ${dateStr}${e.description ? ' — ' + e.description : ''}
+      </span>
+      <span class="balance">${formatNumber(e.amount)} تومان</span>
+    `;
+    row.querySelector('input').addEventListener('change', (ev) => {
+      if (ev.target.checked) selected.add(e.id); else selected.delete(e.id);
+      updateTotal();
+    });
+    row.addEventListener('click', (ev) => {
+      if (ev.target.tagName !== 'INPUT') {
+        const cb = row.querySelector('input');
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      }
+    });
+    listEl.appendChild(row);
+  });
+
+  document.getElementById('selectAllBtn').addEventListener('click', () => {
+    const allSelected = selected.size === expenses.length;
+    expenses.forEach(e => {
+      const cb = document.getElementById(`cb_${e.id}`);
+      cb.checked = !allSelected;
+      if (!allSelected) selected.add(e.id); else selected.delete(e.id);
+    });
+    updateTotal();
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const msgEl = document.getElementById('settlementMsg');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'در حال ارسال...';
+    const res = await apiPost('submit-settlement', {
+      company_id: companyId,
+      expense_ids: Array.from(selected),
+    });
+    if (res?.settlement_id) {
+      msgEl.style.color = 'var(--success)';
+      msgEl.textContent = `تسویه ثبت شد ✅ (${res.expense_count} هزینه، ${formatNumber(res.total_amount)} تومان)`;
+      tg ? setTimeout(() => tg.close(), 1200) : setTimeout(() => location.search = '?screen=home', 1200);
+    } else {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = res?.error || 'خطا در ارسال تسویه. دوباره امتحان کن.';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'ارسال برای تسویه';
+    }
+  });
+
+  updateTotal();
+}
+
+// ===================================================================
 // اجرای صفحه‌ی مناسب بر اساس پارامتر screen
 // ===================================================================
 if (screen === 'request') renderRequestScreen();
@@ -970,6 +1083,7 @@ else if (screen === 'charge') renderChargeScreen();
 else if (screen === 'test') renderTestScreen();
 else if (screen === 'expense') renderExpenseScreen();
 else if (screen === 'settings') renderSettingsScreen();
+else if (screen === 'settlement') renderSettlementScreen();
 else renderHomeScreen();
 </script>
 </body>
