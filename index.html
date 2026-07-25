@@ -158,17 +158,6 @@
 </div>
 
 <script>
-// ===================================================================
-// تنخواه — Telegram WebApp
-// این یک فایل، صفحات را مدیریت می‌کند: expense | request | charge | test
-// انتخاب صفحه از طریق پارامتر ?screen= در آدرس مشخص می‌شود.
-// ===================================================================
-
-// Supabase Edge Functions base URL (project ref: btbmoiqyapfqrigukpzt)
-// ⚠️ همه‌ی endpoint های اصلی ساخته شده‌اند: get-companies، get-tags،
-// get-employees، submit-expense، submit-charge، submit-petty-cash-request،
-// create-company، invite-member، get-registered-expenses، submit-settlement،
-// get-settlement-detail، review-settlement.
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
@@ -207,8 +196,6 @@ function formatNumber(n) {
   return Number(n).toLocaleString('en-US');
 }
 
-// ارقام فارسی/عربی را به لاتین تبدیل می‌کند — برای وقتی می‌خواهیم مقدار را
-// به سرور بفرستیم (Number(...) فقط ارقام لاتین را می‌فهمد).
 function toWesternDigits(str) {
   const persian = '۰۱۲۳۴۵۶۷۸۹';
   const arabic = '٠١٢٣٤٥٦٧٨٩';
@@ -221,17 +208,11 @@ function toWesternDigits(str) {
   });
 }
 
-// ارقام لاتین را به فارسی تبدیل می‌کند — برای نمایش توی کادر ورودی.
 function toPersianDigits(str) {
   const persian = '۰۱۲۳۴۵۶۷۸۹';
   return str.replace(/[0-9]/g, (d) => persian[Number(d)]);
 }
 
-// قانون ورودی‌های عددی توی این فایل: type="tel" + inputmode="numeric" +
-// این تابع روی رویداد input. کاربر با هر کیبوردی تایپ کنه (فارسی یا انگلیسی)،
-// همیشه ارقام فارسی توی کادر نمایش داده می‌شه — چون این یه اپ فارسیه.
-// موقع خوندن مقدار برای فرستادن به سرور، حتماً باید از toWesternDigits رد بشه
-// (چون Number('۵۰۰۰') در جاوااسکریپت NaN می‌ده، نه 5000).
 function sanitizeNumericInput(inputEl) {
   inputEl.addEventListener('input', (e) => {
     const westernDigitsOnly = toWesternDigits(e.target.value).replace(/[^\d]/g, '');
@@ -239,13 +220,10 @@ function sanitizeNumericInput(inputEl) {
   });
 }
 
-// مقدار یک ورودی عددی (که رقم‌های فارسی نمایش می‌ده) را به عدد قابل‌استفاده
-// برای سرور تبدیل می‌کند. همه‌جا به‌جای Number(el.value) از این استفاده کن.
 function readNumericInput(inputEl) {
   return Number(toWesternDigits(inputEl.value));
 }
 
-// همه‌ی Edge Function های ما فقط POST قبول می‌کنن — یک تابع واحد برای همه.
 async function apiPost(endpoint, payload) {
   try {
     const res = await fetch(`${API_BASE_URL}/${endpoint}`, {
@@ -261,8 +239,6 @@ async function apiPost(endpoint, payload) {
   }
 }
 
-// چون هنوز چندشرکتی (multi-company) نداریم (Phase 5.8، ساخته نشده)، همیشه اولین
-// شرکتی که get-companies برمی‌گردونه رو به عنوان شرکت فعال کاربر در نظر می‌گیریم.
 let cachedCompany = null;
 async function getMyCompanyInfo() {
   if (cachedCompany) return cachedCompany;
@@ -277,7 +253,6 @@ async function getMyCompanyId() {
   return info?.company_id ?? null;
 }
 
-// --- داده‌ی نمایشی برای پیش‌نمایش، تا زمان ساخته‌شدن بقیه‌ی Edge Function ها ---
 const DEMO_TAGS = [
   { id: 'fuel', name: 'سوخت' },
   { id: 'meal', name: 'پذیرایی' },
@@ -285,7 +260,6 @@ const DEMO_TAGS = [
   { id: 'transport', name: 'حمل‌ونقل' },
   { id: 'other', name: 'متفرقه' },
 ];
-const DEMO_BALANCE = 850000;
 const DEMO_EMPLOYEES = [
   { company_member_id: 'u1', name: 'علی محمدی', balance: 850000 },
   { company_member_id: 'u2', name: 'سارا احمدی', balance: 120000 },
@@ -296,14 +270,12 @@ const DEMO_EMPLOYEES = [
 const app = document.getElementById('app');
 const screen = new URLSearchParams(location.search).get('screen') || 'home';
 
-// ===================================================================
-// صفحه: ثبت هزینه
-// ===================================================================
 async function renderExpenseScreen() {
   const companyId = await getMyCompanyId();
+  const companyInfo = await getMyCompanyInfo();
   const tagsResult = companyId ? await apiPost('get-tags', { company_id: companyId }) : null;
   const tagsData = tagsResult?.tags || DEMO_TAGS;
-  const balance = DEMO_BALANCE; // در آینده از یک endpoint موجودی گرفته می‌شود
+  const balance = companyInfo?.balance ?? 0;
 
   let selectedTag = null;
   let receiptBase64 = null;
@@ -396,12 +368,11 @@ async function renderExpenseScreen() {
   });
 }
 
-// ===================================================================
-// صفحه: درخواست تنخواه
-// ===================================================================
 async function renderRequestScreen() {
   const companyId = await getMyCompanyId();
-  const balance = DEMO_BALANCE;
+  const companyInfo = await getMyCompanyInfo();
+  const balance = companyInfo?.balance ?? 0;
+  
   app.innerHTML = `
     <div class="screen-title">💵 درخواست تنخواه</div>
     <div class="balance-strip">
@@ -446,16 +417,10 @@ async function renderRequestScreen() {
   });
 }
 
-// ===================================================================
-// صفحه: شارژ تنخواه (مدیر مالی)
-// ===================================================================
 async function renderChargeScreen() {
   const companyId = await getMyCompanyId();
   const employeesResult = companyId ? await apiPost('get-employees', { company_id: companyId }) : null;
 
-  // داخل تلگرام واقعی، شکست get-employees معمولاً یعنی owner نیستی (403) —
-  // نباید بی‌صدا بریم رو داده‌ی دمو، چون گمراه‌کننده‌ست. فقط توی پیش‌نمایش
-  // بیرون از تلگرام (برای دیزاین) دمو نشون داده می‌شه.
   if (isInsideTelegram && !employeesResult) {
     app.innerHTML = `
       <div class="screen-title">💰 شارژ تنخواه</div>
@@ -540,11 +505,6 @@ async function renderChargeScreen() {
   renderList();
 }
 
-// ===================================================================
-// صفحه: تست اتصال — زنجیره‌ی واقعی get-companies -> get-tags -> get-employees
-// به‌علاوه یک فرم واقعی برای submit-expense که می‌شود چندبار پشت‌سرهم زد
-// (مثلاً برای تست منفی‌شدن موجودی). بدون داده‌ی دمو.
-// ===================================================================
 async function renderTestScreen() {
   app.innerHTML = `
     <div class="screen-title">🧪 تست اتصال</div>
@@ -636,7 +596,6 @@ async function renderTestScreen() {
     return;
   }
 
-  // مرحله ۱: get-companies
   let companies = [];
   try {
     const res = await fetch(`${API_BASE_URL}/get-companies`, {
@@ -666,7 +625,6 @@ async function renderTestScreen() {
   const firstCompany = companies[0];
   let tags = [];
 
-  // مرحله ۲: get-tags
   try {
     const res = await fetch(`${API_BASE_URL}/get-tags`, {
       method: 'POST',
@@ -683,7 +641,6 @@ async function renderTestScreen() {
     tagsEl.value = `خطا: ${e}`;
   }
 
-  // مرحله ۳: get-employees (ممکنه 403 بده اگه کاربر owner نباشه — طبیعیه)
   let employees = [];
   try {
     const res = await fetch(`${API_BASE_URL}/get-employees`, {
@@ -703,7 +660,6 @@ async function renderTestScreen() {
 
   statusEl.textContent = '✅ آماده برای تست submit-expense — پایین صفحه رو ببین';
 
-  // --- فرم تست submit-expense ---
   if (tags.length > 0) {
     testTagSelect.innerHTML = tags.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
   } else {
@@ -745,9 +701,6 @@ async function renderTestScreen() {
     }
   });
 
-  // --- فرم تست submit-charge ---
-  // فقط اگه get-employees موفق بود (یعنی کاربر فعلی owner همین شرکته) نمایش داده می‌شه —
-  // برای کاربر employee این بخش مخفی می‌مونه چون submit-charge روش 403 می‌ده.
   if (employees.length > 0) {
     testEmployeeSelect.innerHTML = employees
       .map(e => `<option value="${e.company_member_id}">${e.name} (${e.role}) — موجودی فعلی: ${e.balance}</option>`)
@@ -789,7 +742,6 @@ async function renderTestScreen() {
     }
   });
 
-  // --- فرم تست submit-petty-cash-request ---
   sanitizeNumericInput(testRequestAmount);
 
   testSubmitRequestBtn.addEventListener('click', async () => {
@@ -824,9 +776,6 @@ async function renderTestScreen() {
   });
 }
 
-// ===================================================================
-// دکمه اصلی — از MainButton تلگرام استفاده می‌کند، یا در پیش‌نمایش جایگزین دارد
-// ===================================================================
 function setupMainButton(label, onClick) {
   if (tg) {
     tg.MainButton.setText(label);
@@ -847,11 +796,6 @@ function setupMainButton(label, onClick) {
   }
 }
 
-// ===================================================================
-// صفحه: خانه — مقصد پیش‌فرض Menu Button تلگرام (آیکون کنار اتچمنت).
-// چون Menu Button فقط می‌تونه یک URL ثابت باز کنه (نه پیام inline تلگرام)،
-// این صفحه همون نقش «منو» رو داخل خود WebApp بازی می‌کنه.
-// ===================================================================
 async function renderHomeScreen() {
   const companyInfo = isInsideTelegram ? await getMyCompanyInfo() : null;
   const isOwner = companyInfo?.role === 'owner';
@@ -885,10 +829,6 @@ async function renderHomeScreen() {
   });
 }
 
-// ===================================================================
-// صفحه: تنظیمات — جایگزین کامل «/start settings» که کار نکرد.
-// اگه owner شرکتی نباشی: فرم ساخت شرکت. اگه owner باشی: فرم دعوت کارمند.
-// ===================================================================
 async function renderSettingsScreen() {
   app.innerHTML = `<div class="screen-title">⚙️ تنظیمات</div><div id="settingsBody">در حال بارگذاری...</div>`;
   const bodyEl = document.getElementById('settingsBody');
@@ -901,7 +841,6 @@ async function renderSettingsScreen() {
   const companyInfo = await getMyCompanyInfo();
 
   if (!companyInfo) {
-    // کاربر مالک هیچ شرکتی نیست → فرم ساخت شرکت
     bodyEl.innerHTML = `
       <div class="ledger-row">
         <label>اسم شرکت</label>
@@ -917,7 +856,7 @@ async function renderSettingsScreen() {
       msgEl.textContent = 'در حال ساخت...';
       const result = await apiPost('create-company', { company_name: name });
       if (result?.company_id) {
-        cachedCompany = null; // کش قبلی (خالی) رو پاک کن تا دفعه‌ی بعد دوباره چک بشه
+        cachedCompany = null;
         msgEl.style.color = 'var(--success)';
         msgEl.textContent = 'شرکت ساخته شد ✅';
         setTimeout(() => { location.search = '?screen=home'; }, 900);
@@ -934,7 +873,6 @@ async function renderSettingsScreen() {
     return;
   }
 
-  // owner یه شرکته → فرم دعوت کارمند
   bodyEl.innerHTML = `
     <div class="ledger-row">
       <label>شماره‌ی کارمند</label>
@@ -966,10 +904,6 @@ async function renderSettingsScreen() {
   });
 }
 
-// ===================================================================
-// صفحه: تسویه‌ی هزینه‌ها — کارمند هزینه‌های ثبت‌شده‌ی هنوز-تسویه‌نشده‌اش رو
-// می‌بینه، چندتاش رو تیک می‌زنه (یا «انتخاب همه») و می‌فرسته برای بررسی مالک.
-// ===================================================================
 async function renderSettlementScreen() {
   app.innerHTML = `<div class="screen-title">📋 تسویه‌ی هزینه‌ها</div><div id="settlementBody">در حال بارگذاری...</div>`;
   const bodyEl = document.getElementById('settlementBody');
@@ -1075,10 +1009,6 @@ async function renderSettlementScreen() {
   updateTotal();
 }
 
-// ===================================================================
-// صفحه: بازبینی تسویه (فقط owner) — ریز هزینه‌های یک تسویه رو نشون می‌ده،
-// پیش‌فرض همه تیک‌خورده (تأیید)، owner می‌تونه تیک هرکدوم رو برداره (رد).
-// ===================================================================
 async function renderSettlementReviewScreen() {
   app.innerHTML = `<div class="screen-title">🔍 بازبینی تسویه</div><div id="reviewBody">در حال بارگذاری...</div>`;
   const bodyEl = document.getElementById('reviewBody');
@@ -1168,9 +1098,6 @@ async function renderSettlementReviewScreen() {
   });
 }
 
-// ===================================================================
-// اجرای صفحه‌ی مناسب بر اساس پارامتر screen
-// ===================================================================
 if (screen === 'request') renderRequestScreen();
 else if (screen === 'charge') renderChargeScreen();
 else if (screen === 'test') renderTestScreen();
