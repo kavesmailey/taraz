@@ -871,6 +871,172 @@ function setupMainButton(label, onClick) {
   }
 }
 
+async function renderSettlementsListScreen() {
+  const companyId = await getMyCompanyId();
+  if (!companyId) {
+    app.innerHTML = `${backButtonHtml()}<div class="screen-title">📊 گزارش تسویه‌ها</div><div class="ledger-row" style="border:none;">عضو هیچ شرکتی نیستید.</div>`;
+    attachBackButton();
+    setupBackNav(true);
+    return;
+  }
+
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">📊 گزارش تسویه‌ها</div><div id="listBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
+  const bodyEl = document.getElementById('listBody');
+
+  const result = await apiPost('get-settlements', { company_id: companyId });
+  const settlements = result?.settlements || [];
+
+  if (settlements.length === 0) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">هیچ تسویه‌ی بسته‌ای وجود ندارد.</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = '<div id="settlementsList"></div>';
+  const listEl = document.getElementById('settlementsList');
+
+  settlements.forEach((settlement: any) => {
+    const submittedDate = new Date(settlement.submitted_at).toLocaleDateString('fa-IR');
+    const reviewedDate = new Date(settlement.reviewed_at).toLocaleDateString('fa-IR');
+    const statusFa = { approved: '✅ تأیید', rejected: '❌ رد', correction_requested: '⚠️ تأیید بخشی' }[settlement.status] || settlement.status;
+
+    const row = document.createElement('div');
+    row.className = 'employee-row';
+    row.style.cursor = 'pointer';
+    row.innerHTML = `
+      <span class="name">
+        ${settlement.employee_name}<br/>
+        <span style="font-size:12px;color:var(--ink-soft);">${statusFa} — ${reviewedDate}</span>
+      </span>
+      <span class="balance">${formatNumber(settlement.total_amount)} تومان</span>
+    `;
+    row.addEventListener('click', () => {
+      goTo(`?screen=settlement-detail&id=${settlement.id}`);
+    });
+    listEl.appendChild(row);
+  });
+}
+
+async function renderSettlementDetailScreen() {
+  const settlementId = new URLSearchParams(location.search).get('id');
+  if (!settlementId) {
+    app.innerHTML = `${backButtonHtml()}<div class="screen-title">📋 جزئیات تسویه</div><div class="ledger-row" style="border:none;">شناسه تسویه پیدا نشد.</div>`;
+    attachBackButton();
+    setupBackNav(true);
+    return;
+  }
+
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">📋 جزئیات تسویه</div><div id="detailBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
+  const bodyEl = document.getElementById('detailBody');
+
+  const result = await apiPost('get-settlement-detail', { settlement_id: settlementId });
+  if (!result?.settlement) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;color:var(--danger);">دسترسی نداری یا این تسویه پیدا نشد.</div>`;
+    return;
+  }
+
+  const { settlement, expenses, summary } = result;
+  const submittedDate = new Date(settlement.submitted_at).toLocaleDateString('fa-IR');
+  const reviewedDate = settlement.reviewed_at ? new Date(settlement.reviewed_at).toLocaleDateString('fa-IR') : '—';
+  const statusFa = { approved: '✅ تأیید کامل', rejected: '❌ رد کامل', correction_requested: '⚠️ تأیید بخشی' }[settlement.status] || settlement.status;
+
+  bodyEl.innerHTML = `
+    <div class="ledger-row" style="border:none;">
+      <span style="font-weight:600;font-size:14px;">نام کارمند:</span> ${settlement.employee_name}
+    </div>
+    <div class="ledger-row" style="border:none;">
+      <span style="font-weight:600;font-size:14px;">تاریخ ارسال:</span> ${submittedDate}
+    </div>
+    <div class="ledger-row" style="border:none;">
+      <span style="font-weight:600;font-size:14px;">تاریخ بررسی:</span> ${reviewedDate}
+    </div>
+    <div class="ledger-row" style="border:none;">
+      <span style="font-weight:600;font-size:14px;">وضعیت:</span> ${statusFa}
+    </div>
+
+    <div class="balance-strip" style="margin-top:14px;">
+      <span class="label">جمع کل</span>
+      <span class="value">${formatNumber(summary.total_amount)} تومان</span>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:10px;font-size:13px;">
+      <div style="flex:1;background:var(--paper-raised);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center;">
+        ✅ تأیید: ${summary.approved_count}<br/>${formatNumber(summary.approved_amount)} تومان
+      </div>
+      <div style="flex:1;background:var(--paper-raised);padding:10px;border-radius:8px;border:1px solid var(--line);text-align:center;">
+        ❌ رد: ${summary.rejected_count}<br/>${formatNumber(summary.rejected_amount)} تومان
+      </div>
+    </div>
+
+    <div style="margin-top:14px;">
+      <h4 style="margin:10px 0;font-size:14px;font-weight:600;">ردیف‌های هزینه:</h4>
+      <div id="expensesList"></div>
+    </div>
+
+    <button id="exportBtn" class="test-btn" style="background:var(--gold);margin-top:14px;">📥 دانلود اکسل</button>
+    <div id="exportMsg" style="margin-top:10px;font-size:13px;"></div>
+  `;
+
+  const expensesListEl = document.getElementById('expensesList');
+  expenses.forEach((exp: any, idx: number) => {
+    const dateStr = new Date(exp.created_at).toLocaleDateString('fa-IR');
+    const expStatusFa = { approved: '✅', rejected: '❌', registered: '⏳' }[exp.status] || exp.status;
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:10px;background:var(--paper-raised);border-radius:8px;border:1px solid var(--line);margin-bottom:8px;font-size:13px;';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-weight:600;">${idx + 1}. ${exp.tag_name}</span>
+        <span>${expStatusFa}</span>
+      </div>
+      <div style="color:var(--ink-soft);font-size:12px;margin-bottom:4px;">${dateStr}${exp.description ? ' — ' + exp.description : ''}</div>
+      <div style="text-align:right;font-weight:700;font-size:14px;color:var(--gold);">${formatNumber(exp.amount)} تومان</div>
+    `;
+    expensesListEl.appendChild(row);
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('exportBtn');
+    const msgEl = document.getElementById('exportMsg');
+    btn.disabled = true;
+    btn.textContent = 'در حال تولید...';
+
+    const res = await apiPost('export-settlement-xlsx', { settlement_id: settlementId });
+    if (res?.xlsx_base64) {
+      try {
+        // base64 → blob → download
+        const binaryString = atob(res.xlsx_base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `settlement_${res.settlement_id.substring(0, 8)}_${res.employee_name}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        msgEl.style.color = 'var(--success)';
+        msgEl.textContent = 'فایل دانلود شد ✅';
+      } catch (e) {
+        msgEl.style.color = 'var(--danger)';
+        msgEl.textContent = 'خطا در دانلود: ' + String(e);
+      }
+    } else {
+      msgEl.style.color = 'var(--danger)';
+      msgEl.textContent = res?.error || 'خطا در تولید فایل';
+    }
+    btn.disabled = false;
+    btn.textContent = '📥 دانلود اکسل';
+  });
+}
+
 async function renderHomeScreen() {
   // home is the root screen — nothing to go back to, so the back trail resets here.
   sessionStorage.removeItem('navStack');
@@ -890,6 +1056,7 @@ async function renderHomeScreen() {
       <button id="homeExpenseBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">🧾 ثبت هزینه</button>
       <button id="homeRequestBtn" class="test-btn" style="background:var(--ink);margin-bottom:10px;">💵 درخواست تنخواه</button>
       <button id="homeSettlementBtn" class="test-btn" style="background:var(--danger);margin-bottom:10px;">📋 تسویه هزینه‌ها</button>
+      ${isOwner ? '<button id="homeReportBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">📊 گزارش تسویه‌ها</button>' : ''}
       ${isOwner ? '<button id="homeChargeBtn" class="test-btn" style="background:var(--success);margin-bottom:10px;">💰 شارژ تنخواه</button>' : ''}
       <button id="homeSettingsBtn" class="test-btn" style="background:var(--ink-soft);">⚙️ تنظیمات</button>
     </div>
@@ -904,6 +1071,9 @@ async function renderHomeScreen() {
     goTo('?screen=settlement');
   });
   if (isOwner) {
+    document.getElementById('homeReportBtn').addEventListener('click', () => {
+      goTo('?screen=settlements-list');
+    });
     document.getElementById('homeChargeBtn').addEventListener('click', () => {
       goTo('?screen=charge');
     });
@@ -1178,7 +1348,7 @@ async function renderSettlementReviewScreen() {
       msgEl.style.color = 'var(--success)';
       const statusFa = { approved: 'تأیید کامل', rejected: 'رد کامل', correction_requested: 'تأیید بخشی' }[res.final_status] || res.final_status;
       msgEl.textContent = `ثبت شد ✅ — نتیجه: ${statusFa} (${res.approved_count} تأیید، ${res.rejected_count} رد)`;
-      tg ? setTimeout(() => tg.close(), 1600) : setTimeout(() => location.search = '?screen=home', 1600);
+      setTimeout(() => { goTo(`?screen=settlement-detail&id=${settlementId}`); }, 1200);
     } else {
       msgEl.style.color = 'var(--danger)';
       msgEl.textContent = res?.error || 'خطا در ثبت بررسی. دوباره امتحان کن.';
@@ -1195,6 +1365,8 @@ else if (screen === 'expense') renderExpenseScreen();
 else if (screen === 'settings') renderSettingsScreen();
 else if (screen === 'settlement') renderSettlementScreen();
 else if (screen === 'settlement-review') renderSettlementReviewScreen();
+else if (screen === 'settlements-list') renderSettlementsListScreen();
+else if (screen === 'settlement-detail') renderSettlementDetailScreen();
 else renderHomeScreen();
 </script>
 </body>
