@@ -31,6 +31,13 @@
   .screen-title {
     font-size: 20px; font-weight: 800; margin: 4px 0 18px;
   }
+  .back-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: none; color: var(--ink-soft);
+    font-family: 'Vazirmatn', Tahoma, sans-serif; font-size: 14px; font-weight: 600;
+    padding: 6px 2px; margin-bottom: 4px; cursor: pointer;
+  }
+  .back-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; border-radius: 6px; }
   .balance-strip {
     background: var(--paper-raised);
     border: 1px solid var(--line);
@@ -151,10 +158,10 @@
 <div id="app"></div>
 <div id="toast" class="toast"></div>
 <div id="previewSwitch" class="preview-switch" style="display:none">
-  <button onclick="location.search='?screen=home'">خانه</button>
-  <button onclick="location.search='?screen=expense'">ثبت هزینه</button>
-  <button onclick="location.search='?screen=request'">درخواست تنخواه</button>
-  <button onclick="location.search='?screen=charge'">شارژ (مدیر مالی)</button>
+  <button onclick="goTo('?screen=home')">خانه</button>
+  <button onclick="goTo('?screen=expense')">ثبت هزینه</button>
+  <button onclick="goTo('?screen=request')">درخواست تنخواه</button>
+  <button onclick="goTo('?screen=charge')">شارژ (مدیر مالی)</button>
 </div>
 
 <script>
@@ -224,6 +231,56 @@ function readNumericInput(inputEl) {
   return Number(toWesternDigits(inputEl.value));
 }
 
+// --- Real back navigation (goes to the actual previous screen, not always home) ---
+function getNavStack() {
+  try { return JSON.parse(sessionStorage.getItem('navStack') || '[]'); } catch (e) { return []; }
+}
+function setNavStack(stack) {
+  sessionStorage.setItem('navStack', JSON.stringify(stack));
+}
+// Use this instead of `location.search = '...'` for any in-app navigation,
+// so the back button/back gesture can return to where the user actually came from.
+function goTo(search) {
+  const stack = getNavStack();
+  stack.push(location.search || '?screen=home');
+  setNavStack(stack);
+  location.search = search;
+}
+function goBack() {
+  const stack = getNavStack();
+  const prev = stack.pop();
+  setNavStack(stack);
+  location.search = prev || '?screen=home';
+}
+
+// In-page fallback back button — only used OUTSIDE Telegram (preview mode).
+// Inside Telegram we use the native tg.BackButton instead (shows in the WebApp header).
+function backButtonHtml() {
+  if (isInsideTelegram) return '';
+  return `<button id="backBtn" class="back-btn" type="button">→ بازگشت</button>`;
+}
+function attachBackButton() {
+  const btn = document.getElementById('backBtn');
+  if (btn) btn.addEventListener('click', goBack);
+}
+// Call on every screen render: setupBackNav(true) for all sub-screens, setupBackNav(false) on home.
+function setupBackNav(show) {
+  if (!tg) return;
+  if (show) {
+    tg.BackButton.show();
+    if (tg._lastBackHandler) tg.BackButton.offClick(tg._lastBackHandler);
+    tg.BackButton.onClick(goBack);
+    tg._lastBackHandler = goBack;
+  } else {
+    tg.BackButton.hide();
+  }
+}
+// after a successful money-touching submit: invalidate cache + go home (dead end, no back needed)
+function goHomeAfterSubmit(delayMs = 700) {
+  cachedCompany = null;
+  setTimeout(() => { location.search = '?screen=home'; }, delayMs);
+}
+
 async function apiPost(endpoint, payload) {
   try {
     const res = await fetch(`${API_BASE_URL}/${endpoint}`, {
@@ -281,6 +338,7 @@ async function renderExpenseScreen() {
   let receiptBase64 = null;
 
   app.innerHTML = `
+    ${backButtonHtml()}
     <div class="screen-title">🧾 ثبت هزینه</div>
     <div class="balance-strip">
       <span class="label">موجودی فعلی</span>
@@ -311,6 +369,8 @@ async function renderExpenseScreen() {
       </div>
     </div>
   `;
+  attachBackButton();
+  setupBackNav(true);
 
   const tagListEl = document.getElementById('tagList');
   tagsData.forEach(tag => {
@@ -361,7 +421,8 @@ async function renderExpenseScreen() {
       description: document.getElementById('description').value,
     });
     if (result) {
-      tg ? tg.close() : showToast('هزینه ثبت شد ✅');
+      showToast('هزینه ثبت شد ✅');
+      goHomeAfterSubmit();
     } else {
       showToast('سرور هنوز وصل نیست — این فقط پیش‌نمایش است');
     }
@@ -374,6 +435,7 @@ async function renderRequestScreen() {
   const balance = companyInfo?.balance ?? 0;
   
   app.innerHTML = `
+    ${backButtonHtml()}
     <div class="screen-title">💵 درخواست تنخواه</div>
     <div class="balance-strip">
       <span class="label">موجودی فعلی</span>
@@ -391,6 +453,8 @@ async function renderRequestScreen() {
       <textarea id="description" rows="2" placeholder="مثلاً: برای سفر کاری هفته آینده"></textarea>
     </div>
   `;
+  attachBackButton();
+  setupBackNav(true);
 
   sanitizeNumericInput(document.getElementById('amount'));
 
@@ -410,7 +474,8 @@ async function renderRequestScreen() {
       description: document.getElementById('description').value,
     });
     if (result) {
-      tg ? tg.close() : showToast('درخواست ارسال شد ✅');
+      showToast('درخواست ارسال شد ✅');
+      goHomeAfterSubmit();
     } else {
       showToast('سرور هنوز وصل نیست — این فقط پیش‌نمایش است');
     }
@@ -423,17 +488,21 @@ async function renderChargeScreen() {
 
   if (isInsideTelegram && !employeesResult) {
     app.innerHTML = `
+      ${backButtonHtml()}
       <div class="screen-title">💰 شارژ تنخواه</div>
       <div class="ledger-row" style="border:none;text-align:center;color:var(--danger);padding-top:24px;">
         شما به این بخش دسترسی ندارید. فقط مالک شرکت می‌تواند تنخواه شارژ کند.
       </div>
     `;
+    attachBackButton();
+    setupBackNav(true);
     return;
   }
 
   const employees = employeesResult?.employees || DEMO_EMPLOYEES;
 
   app.innerHTML = `
+    ${backButtonHtml()}
     <div class="screen-title">💰 شارژ تنخواه</div>
     <input id="search" class="employee-search" placeholder="🔍 جستجوی نام کارمند..." />
     <div id="empList"></div>
@@ -450,6 +519,8 @@ async function renderChargeScreen() {
       </div>
     </div>
   `;
+  attachBackButton();
+  setupBackNav(true);
 
   let selectedEmployee = null;
   const empListEl = document.getElementById('empList');
@@ -494,7 +565,8 @@ async function renderChargeScreen() {
         description: document.getElementById('chargeDescription').value,
       });
       if (result) {
-        tg ? tg.close() : showToast('شارژ ثبت شد ✅');
+        showToast('شارژ ثبت شد ✅');
+        goHomeAfterSubmit();
       } else {
         showToast('سرور هنوز وصل نیست — این فقط پیش‌نمایش است');
       }
@@ -507,6 +579,7 @@ async function renderChargeScreen() {
 
 async function renderTestScreen() {
   app.innerHTML = `
+    ${backButtonHtml()}
     <div class="screen-title">🧪 تست اتصال</div>
 
     <div class="ledger-row">
@@ -569,6 +642,8 @@ async function renderTestScreen() {
       <textarea id="requestLog" rows="8" readonly style="font-size:11px;direction:ltr;"></textarea>
     </div>
   `;
+  attachBackButton();
+  setupBackNav(true);
 
   const initDataEl = document.getElementById('rawInitData');
   const statusEl = document.getElementById('testStatus');
@@ -797,11 +872,20 @@ function setupMainButton(label, onClick) {
 }
 
 async function renderHomeScreen() {
+  // home is the root screen — nothing to go back to, so the back trail resets here.
+  sessionStorage.removeItem('navStack');
+  setupBackNav(false);
   const companyInfo = isInsideTelegram ? await getMyCompanyInfo() : null;
   const isOwner = companyInfo?.role === 'owner';
+  const balance = companyInfo?.balance;
 
   app.innerHTML = `
     <div class="screen-title">تنخواه 👋</div>
+    ${companyInfo ? `
+    <div class="balance-strip">
+      <span class="label">موجودی فعلی</span>
+      <span class="value ${balance < 0 ? 'negative' : ''}">${formatNumber(balance)} تومان</span>
+    </div>` : ''}
     <div class="ledger-row" style="border:none;">
       <button id="homeExpenseBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">🧾 ثبت هزینه</button>
       <button id="homeRequestBtn" class="test-btn" style="background:var(--ink);margin-bottom:10px;">💵 درخواست تنخواه</button>
@@ -811,26 +895,28 @@ async function renderHomeScreen() {
     </div>
   `;
   document.getElementById('homeExpenseBtn').addEventListener('click', () => {
-    location.search = '?screen=expense';
+    goTo('?screen=expense');
   });
   document.getElementById('homeRequestBtn').addEventListener('click', () => {
-    location.search = '?screen=request';
+    goTo('?screen=request');
   });
   document.getElementById('homeSettlementBtn').addEventListener('click', () => {
-    location.search = '?screen=settlement';
+    goTo('?screen=settlement');
   });
   if (isOwner) {
     document.getElementById('homeChargeBtn').addEventListener('click', () => {
-      location.search = '?screen=charge';
+      goTo('?screen=charge');
     });
   }
   document.getElementById('homeSettingsBtn').addEventListener('click', () => {
-    location.search = '?screen=settings';
+    goTo('?screen=settings');
   });
 }
 
 async function renderSettingsScreen() {
-  app.innerHTML = `<div class="screen-title">⚙️ تنظیمات</div><div id="settingsBody">در حال بارگذاری...</div>`;
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">⚙️ تنظیمات</div><div id="settingsBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
   const bodyEl = document.getElementById('settingsBody');
 
   if (!isInsideTelegram) {
@@ -905,7 +991,9 @@ async function renderSettingsScreen() {
 }
 
 async function renderSettlementScreen() {
-  app.innerHTML = `<div class="screen-title">📋 تسویه‌ی هزینه‌ها</div><div id="settlementBody">در حال بارگذاری...</div>`;
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">📋 تسویه‌ی هزینه‌ها</div><div id="settlementBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
   const bodyEl = document.getElementById('settlementBody');
 
   if (!isInsideTelegram) {
@@ -1010,7 +1098,9 @@ async function renderSettlementScreen() {
 }
 
 async function renderSettlementReviewScreen() {
-  app.innerHTML = `<div class="screen-title">🔍 بازبینی تسویه</div><div id="reviewBody">در حال بارگذاری...</div>`;
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">🔍 بازبینی تسویه</div><div id="reviewBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
   const bodyEl = document.getElementById('reviewBody');
 
   if (!isInsideTelegram) {
