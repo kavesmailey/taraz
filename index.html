@@ -896,7 +896,7 @@ async function renderSettlementsListScreen() {
   bodyEl.innerHTML = '<div id="settlementsList"></div>';
   const listEl = document.getElementById('settlementsList');
 
-  settlements.forEach((settlement: any) => {
+  settlements.forEach((settlement) => {
     const submittedDate = new Date(settlement.submitted_at).toLocaleDateString('fa-IR');
     const reviewedDate = new Date(settlement.reviewed_at).toLocaleDateString('fa-IR');
     const statusFa = { approved: '✅ تأیید', rejected: '❌ رد', correction_requested: '⚠️ تأیید بخشی' }[settlement.status] || settlement.status;
@@ -981,7 +981,7 @@ async function renderSettlementDetailScreen() {
   `;
 
   const expensesListEl = document.getElementById('expensesList');
-  expenses.forEach((exp: any, idx: number) => {
+  expenses.forEach((exp, idx) => {
     const dateStr = new Date(exp.created_at).toLocaleDateString('fa-IR');
     const expStatusFa = { approved: '✅', rejected: '❌', registered: '⏳' }[exp.status] || exp.status;
     const row = document.createElement('div');
