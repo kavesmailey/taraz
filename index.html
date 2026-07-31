@@ -1051,6 +1051,7 @@ async function renderHomeScreen() {
       <button id="homeSettlementBtn" class="test-btn" style="background:var(--danger);margin-bottom:10px;">📋 تسویه هزینه‌ها</button>
       ${canManageSettlements ? '<button id="homeReportBtn" class="test-btn" style="background:var(--gold);margin-bottom:10px;">📊 گزارش تسویه‌ها</button>' : ''}
       ${canManageSettlements ? '<button id="homeChargeBtn" class="test-btn" style="background:var(--success);margin-bottom:10px;">💰 شارژ تنخواه</button>' : ''}
+      ${canManageSettlements ? '<button id="homeLimitsBtn" class="test-btn" style="background:var(--ink-soft);margin-bottom:10px;">⚙️ تنظیمات حد منفی</button>' : ''}
       <button id="homeSettingsBtn" class="test-btn" style="background:var(--ink-soft);">⚙️ تنظیمات</button>
     </div>
   `;
@@ -1069,6 +1070,9 @@ async function renderHomeScreen() {
     });
     document.getElementById('homeChargeBtn').addEventListener('click', () => {
       goTo('?screen=charge');
+    });
+    document.getElementById('homeLimitsBtn').addEventListener('click', () => {
+      goTo('?screen=member-limits');
     });
   }
   document.getElementById('homeSettingsBtn').addEventListener('click', () => {
@@ -1160,6 +1164,19 @@ async function renderSettingsScreen() {
       msgEl.textContent = 'خطا در ارسال دعوت. دوباره امتحان کن.';
     }
   });
+
+  // Limits management link برای owner/fm
+  if (companyInfo.role === 'owner' || companyInfo.role === 'finance_manager') {
+    const limitsSection = document.createElement('div');
+    limitsSection.style.cssText = 'margin-top:20px;padding-top:20px;border-top:1px solid var(--line);';
+    limitsSection.innerHTML = `
+      <button id="limitSettingsBtn" class="test-btn" style="background:var(--gold);margin-top:10px;">⚙️ تنظیمات حد منفی برای کارمندان</button>
+    `;
+    bodyEl.appendChild(limitsSection);
+    document.getElementById('limitSettingsBtn').addEventListener('click', () => {
+      goTo('?screen=member-limits');
+    });
+  }
 }
 
 async function renderSettlementScreen() {
@@ -1360,6 +1377,112 @@ async function renderSettlementReviewScreen() {
   });
 }
 
+async function renderMemberLimitsScreen() {
+  const companyId = await getMyCompanyId();
+  const companyInfo = await getMyCompanyInfo();
+  
+  if (!companyId || (companyInfo?.role !== 'owner' && companyInfo?.role !== 'finance_manager')) {
+    app.innerHTML = `${backButtonHtml()}<div class="screen-title">⚙️ تنظیمات حد منفی</div><div class="ledger-row" style="border:none;text-align:center;color:var(--danger);">فقط مالک و مدیر مالی دسترسی دارند.</div>`;
+    attachBackButton();
+    setupBackNav(true);
+    return;
+  }
+
+  app.innerHTML = `${backButtonHtml()}<div class="screen-title">⚙️ تنظیمات حد منفی</div><div id="limitsBody">در حال بارگذاری...</div>`;
+  attachBackButton();
+  setupBackNav(true);
+  const bodyEl = document.getElementById('limitsBody');
+
+  const result = await apiPost('get-members-for-limit-config', { company_id: companyId });
+  const members = result?.members || [];
+
+  if (members.length === 0) {
+    bodyEl.innerHTML = `<div class="ledger-row" style="border:none;">کارمندی برای تنظیم حد منفی وجود ندارد.</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = `
+    <div class="ledger-row" style="border:none;font-size:12px;color:var(--ink-soft);">
+      برای هر کارمند می‌تونی حد منفی تنظیم کن. اگه خالی بگذاری، حد پیش‌فرض (نامحدود) استفاده می‌شه.
+    </div>
+    <div id="membersList"></div>
+  `;
+
+  const listEl = document.getElementById('membersList');
+
+  members.forEach((member) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:14px;background:var(--paper-raised);border-radius:8px;border:1px solid var(--line);margin-bottom:10px;';
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-weight:600;">${member.name}</span>
+        <span style="font-size:12px;color:var(--ink-soft);">${member.role === 'owner' ? 'مالک' : member.role === 'finance_manager' ? 'مدیر مالی' : 'کارمند'}</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <label style="font-size:12px;color:var(--ink-soft);min-width:100px;">حد منفی (تومان):</label>
+        <input 
+          type="tel" 
+          inputmode="numeric" 
+          class="member-limit-input" 
+          data-member-id="${member.company_member_id}"
+          placeholder="خالی = نامحدود"
+          value="${member.negative_limit ? formatNumber(member.negative_limit) : ''}"
+          style="flex:1;padding:6px;border:1px solid var(--line);border-radius:6px;font-family:inherit;text-align:center;"
+        />
+        <button class="save-limit-btn" data-member-id="${member.company_member_id}" style="padding:6px 12px;background:var(--gold);color:var(--paper);border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:12px;">ذخیره</button>
+      </div>
+      <div class="limit-status" data-member-id="${member.company_member_id}" style="font-size:11px;margin-top:4px;color:var(--ink-soft);"></div>
+    `;
+    listEl.appendChild(row);
+  });
+
+  // Setup numeric inputs
+  document.querySelectorAll('.member-limit-input').forEach(input => {
+    sanitizeNumericInput(input);
+  });
+
+  // Setup save buttons
+  document.querySelectorAll('.save-limit-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const memberId = btn.getAttribute('data-member-id');
+      const inputEl = document.querySelector(`.member-limit-input[data-member-id="${memberId}"]`);
+      const statusEl = document.querySelector(`.limit-status[data-member-id="${memberId}"]`);
+      
+      let limitValue = null;
+      if (inputEl.value.trim()) {
+        limitValue = readNumericInput(inputEl);
+        if (!Number.isFinite(limitValue) || limitValue < 0) {
+          statusEl.textContent = '❌ مقدار نامعتبر';
+          statusEl.style.color = 'var(--danger)';
+          return;
+        }
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'در حال ذخیره...';
+      statusEl.textContent = '';
+
+      const result = await apiPost('update-member-limit', {
+        company_id: companyId,
+        target_company_member_id: memberId,
+        negative_limit: limitValue,
+      });
+
+      if (result) {
+        statusEl.textContent = '✅ ذخیره شد';
+        statusEl.style.color = 'var(--success)';
+      } else {
+        statusEl.textContent = '❌ خطا در ذخیره';
+        statusEl.style.color = 'var(--danger)';
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'ذخیره';
+      setTimeout(() => { statusEl.textContent = ''; }, 2000);
+    });
+  });
+}
+
 if (screen === 'request') renderRequestScreen();
 else if (screen === 'charge') renderChargeScreen();
 else if (screen === 'test') renderTestScreen();
@@ -1369,6 +1492,7 @@ else if (screen === 'settlement') renderSettlementScreen();
 else if (screen === 'settlement-review') renderSettlementReviewScreen();
 else if (screen === 'settlements-list') renderSettlementsListScreen();
 else if (screen === 'settlement-detail') renderSettlementDetailScreen();
+else if (screen === 'member-limits') renderMemberLimitsScreen();
 else renderHomeScreen();
 </script>
 </body>
