@@ -493,11 +493,13 @@ async function renderChargeScreen() {
   }
 
   const employees = employeesResult?.employees || DEMO_EMPLOYEES;
+  const companyInfo = await getMyCompanyInfo();
+  const isOwner = companyInfo?.role === 'owner';
 
   app.innerHTML = `
     ${backButtonHtml()}
     <div class="screen-title">💰 شارژ تنخواه</div>
-    <input id="search" class="employee-search" placeholder="🔍 جستجوی نام کارمند..." />
+    <input id="search" class="employee-search" placeholder="🔍 جستجوی نام..." />
     <div id="empList"></div>
     <div id="chargeForm" class="charge-form" style="display:none">
       <div class="ledger-row"><label id="selectedName"></label></div>
@@ -526,8 +528,10 @@ async function renderChargeScreen() {
         const row = document.createElement('div');
         row.className = 'employee-row';
         row.tabIndex = 0;
+        // اگه owner است و نام مسابقت دارد، "خودم" نشون بده
+        const displayName = (isOwner && emp.role === 'owner') ? `${emp.name} (خودم)` : emp.name;
         row.innerHTML = `
-          <span class="name">${emp.name}</span>
+          <span class="name">${displayName}</span>
           <span class="balance ${emp.balance < 0 ? 'negative' : ''}">${formatNumber(emp.balance)} تومان</span>
         `;
         row.onclick = () => selectEmployee(emp);
@@ -538,7 +542,8 @@ async function renderChargeScreen() {
   function selectEmployee(emp) {
     selectedEmployee = emp;
     document.getElementById('chargeForm').style.display = 'block';
-    document.getElementById('selectedName').textContent = `در حال شارژ حساب: ${emp.name}`;
+    const displayName = (isOwner && emp.role === 'owner') ? `${emp.name} (خودم)` : emp.name;
+    document.getElementById('selectedName').textContent = `در حال شارژ حساب: ${displayName}`;
     document.getElementById('chargeAmount').focus();
     sanitizeNumericInput(document.getElementById('chargeAmount'));
     setupMainButton('ثبت شارژ', async () => {
