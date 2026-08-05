@@ -168,7 +168,14 @@
 const API_BASE_URL = "https://btbmoiqyapfqrigukpzt.supabase.co/functions/v1";
 
 const tg = window.Telegram?.WebApp;
-const isInsideTelegram = !!(tg && tg.initData);
+// نکته: توی تلگرام دسکتاپ، گاهی tg.initData همون لحظه‌ی اول لود اسکریپت
+// هنوز خالیه (با تأخیر پر می‌شه)، در حالی که tg.platform همون لحظه پر است
+// (مثلاً "tdesktop"). قبلاً فقط initData رو چک می‌کردیم و همین باعث می‌شد
+// دسکتاپ اشتباهاً "خارج از تلگرام" تشخیص داده بشه. حالا platform رو هم
+// به‌عنوان سیگنال معتبر قبول می‌کنیم.
+const isInsideTelegram = !!(
+  tg && (tg.initData || (tg.platform && tg.platform !== 'unknown'))
+);
 
 function applyTelegramTheme() {
   if (!tg || !tg.themeParams) return;
